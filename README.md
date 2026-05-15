@@ -2,6 +2,10 @@
 
 A toolkit for Claude Managed Agents.
 
+> [!WARNING]
+> **Experimental — not for production use.**
+> Braid is an early-stage research project. APIs, flows, and outputs are unstable and may change or break without notice. It is provided as-is, without warranty of any kind, for experimentation and demonstration only. Do not rely on it for production workloads, sensitive data, or anything you cannot afford to lose.
+
 ## Six tools
 
 - **Agent** — the job description.
