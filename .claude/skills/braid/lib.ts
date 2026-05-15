@@ -32,6 +32,7 @@ export type MemoryStoreSpec = {
   access?: "read_only" | "read_write";
   instructions?: string;
   seed?: { mount: string; files: string[] };
+  dream_instructions?: string;
 };
 
 export type Manifest = {
@@ -50,6 +51,7 @@ export type Manifest = {
     attach_stores?: boolean;
     stall_ms?: number;
     max_restarts?: number;
+    log_runs?: boolean;
     outcome?: {
       description: string;
       rubric_file?: string;
@@ -214,6 +216,14 @@ export async function ensureResources(manifest: Manifest, state: State): Promise
     state.stores[s.key] = store.id;
     console.log(`  store ${s.key}: ${store.id}`);
     if (s.seed) await seedStore(manifest, state, s, store.id);
+  }
+
+  if (manifest.run?.log_runs && !state.stores.runLog) {
+    const store = await (c.beta as unknown as {
+      memoryStores: { create: (args: { name: string }) => Promise<{ id: string }> };
+    }).memoryStores.create({ name: `${manifest.name}-runs` });
+    state.stores.runLog = store.id;
+    console.log(`  store runLog: ${store.id}`);
   }
 
   state.agents ??= {};
@@ -388,7 +398,8 @@ export function buildInitialEvents(manifest: Manifest, brief: string) {
   return events;
 }
 
-export async function downloadSessionFiles(sessionId: string, outDir: string, emit: (t: string, p: unknown) => void) {
+export async function downloadSessionFiles(sessionId: string, outDir: string, emit: (t: string, p: unknown) => void): Promise<string[]> {
+  const saved: string[] = [];
   try {
     const files = await c.beta.files.list({
       scope_id: sessionId,
@@ -399,9 +410,50 @@ export async function downloadSessionFiles(sessionId: string, outDir: string, em
       const buf = Buffer.from(await (await c.beta.files.download(f.id)).arrayBuffer());
       writeFileSync(`${outDir}/${fname}`, buf);
       emit("saved", `${outDir}/${fname}`);
+      saved.push(fname);
     }
   } catch {
     emit("info", "no session files to download");
+  }
+  return saved;
+}
+
+export async function appendRunLog(
+  manifest: Manifest,
+  state: State,
+  sessionId: string,
+  brief: string,
+  agentReport: string,
+  outcome: { result?: unknown; note?: string } | null,
+  savedFiles: string[],
+): Promise<string | null> {
+  const storeId = state.stores?.runLog;
+  if (!storeId) return null;
+  const date = new Date().toISOString();
+  const path = `/runs/${date.slice(0, 10)}-${sessionId.slice(-8)}.md`;
+  const content = `# ${manifest.name} run ${sessionId}
+date: ${date}
+
+## Brief
+${brief}
+
+## Outcome
+${outcome ? `result: ${JSON.stringify(outcome.result)}\nnote: ${outcome.note ?? ""}` : "(none)"}
+
+## Deliverables
+${savedFiles.length ? savedFiles.map((f) => `- ${f}`).join("\n") : "(none)"}
+
+## Agent report
+${agentReport.slice(0, 8000)}
+`;
+  try {
+    await (c.beta as unknown as {
+      memoryStores: { memories: { create: (storeId: string, args: { path: string; content: string }) => Promise<{ id: string }> } };
+    }).memoryStores.memories.create(storeId, { path, content });
+    return path;
+  } catch (err) {
+    console.error(`[runLog] write failed: ${(err as Error).message}`);
+    return null;
   }
 }
 

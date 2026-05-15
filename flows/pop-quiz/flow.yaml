@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../.claude/skills/braid/flow.schema.json
+name: pop-quiz
+brief_default: "Scene: a Canada goose in a small brown corduroy blazer substitutes for the regular teacher in a 1970s-era public school classroom — arriving with a leather briefcase, presenting at the chalkboard with a wooden pointer, then grading papers at the desk while children work quietly."
+
+vault:
+  display_name: fal-pop-quiz
+  credential:
+    display_name: Fal MCP
+    mcp_server_url: https://mcp.fal.ai/mcp
+    token_env: FAL_API_KEY
+
+agents:
+  - key: storyboarder
+    file: agents/storyboarder.yaml
+
+run:
+  attach_vault: true
+  stall_ms: 180000
+  max_restarts: 0
+  outcome:
+    description: "Manifest at /mnt/session/outputs/manifest.json with 3 stills, 3 motion clips, and a composited /mnt/session/outputs/final.mp4 (single optimized video). All asset URLs reachable; final.mp4 exists and is non-empty."
+    max_iterations: 1

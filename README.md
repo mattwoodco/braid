@@ -39,4 +39,8 @@ Inside Claude Code:
 Each lives in `flows/<name>/` with a `flow.yaml` and agent YAML files.
 
 - **ad** — director + producer + critic + sentinel.
-- **fundraiser** — videographer (Fal MCP) + web-builder (Vercel) + director. Ships a live one-pager with a hero video.
+- **fundraiser** — videographer (Fal MCP) + web-builder (Vercel) + director. Ships a live one-pager with a hero video. [live](https://fundraiser-site-one.vercel.app/)
+- **final-inning** — 3-shot fundraiser, little-league field. [live](https://final-inning-site.vercel.app/)
+- **homecoming** — 3-shot fundraiser, veteran service dogs. [live](https://homecoming-site.vercel.app/)
+- **quiet-rebellion** — 3-shot fundraiser, scrubland conservation. [live](https://quiet-rebellion-site.vercel.app/)
+- **pop-quiz** — 3-shot deadpan storyboard (goose substitute teacher) with a mediabunny-composited `final.mp4`.

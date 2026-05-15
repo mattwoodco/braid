@@ -54,8 +54,17 @@ If the user invokes the skill with no arguments (e.g. just `/braid`):
 | `run <flow> [brief] [sesn_id]` | Start (or resume) a session and stream events |
 | `sessions <flow> [--pick\|--kill\|--kill-all]` | Inspect tracked sessions |
 | `pull <flow> [key...]` | Overwrite local `agents/*.yaml` with the latest from Anthropic. Pulled YAML is safe to re-use in a fresh setup — multiagent IDs get rewritten from `coordinator:` in `flow.yaml`. |
-| `dream <flow>` | Run a dream over tracked sessions (updates brand memory store) |
+| `dream <flow> [--store K] [--instructions "..."] [--sessions N] [--model M]` | Run a dream over tracked sessions and consolidate into store `K`. If `--store` is omitted and the flow has multiple stores, you'll be prompted. Per-store defaults can be set via `dream_instructions:` in `flow.yaml`. |
 | `purge [--select]` | Tear down all Anthropic infra |
+
+## Memory logging of finished runs
+
+Set `run.log_runs: true` in `flow.yaml` and `setup` will provision a memory store
+keyed `runLog` (named `<flow>-runs`). After every `run`, a markdown summary is
+written to `/runs/<date>-<sessionId>.md` inside that store containing the brief,
+outcome verdict, deliverable filenames, and the agent's final text. The runLog
+store is reading material for `dream` — point a dream at it to mine patterns
+across many runs, or attach it read-only to an agent that needs prior context.
 
 ## Adding a new flow
 
@@ -77,6 +86,7 @@ The skill fills these in if you don't set them:
 | `agents[].is_director` | `true` for the lone agent in a single-agent flow |
 | `run.attach_vault` | `true` |
 | `run.attach_stores` | `true` |
+| `run.log_runs` | `false` — set to `true` to auto-provision a `runLog` store and write a summary after each run |
 | `run.outcome.rubric_file` | falls back to using `outcome.description` verbatim as the rubric |
 
 Only `name` and `agents` are truly required. A minimal flow can be a dozen lines.
@@ -174,3 +184,36 @@ system: |
 ```
 
 The token is added to the session transcript at Anthropic. Fine for personal dev tokens; rotate if paranoid.
+
+## Compositing multi-shot video flows
+
+If your flow produces N independent video clips that should also exist as one combined deliverable, add a **composite step** to the producing agent. The rule is simple and lives in the agent's system prompt:
+
+> **Composite rule:** If the storyboard has FEWER THAN 5 shots, the agent MUST composite the clips into a single `final.mp4` in `/mnt/session/outputs/` after generation. If 5 or more shots, SKIP composite — the run is long enough that each shot stands on its own.
+
+Use ffmpeg's concat demuxer to join (kling/Fal mp4s share codec, so `-c copy` works), then [`mediabunny`](https://mediabunny.dev/guide/extensions/server) for the optimize pass (web-friendly H.264 + faststart). Mediabunny's `Conversion` API takes a single input/output, so it's the optimizer, not the concatenator.
+
+```bash
+# In the agent's bash step, after manifest assembly:
+cd /mnt/session/outputs
+curl -fsSL -o shot_01.mp4 "<video_url_0>"
+curl -fsSL -o shot_02.mp4 "<video_url_1>"
+curl -fsSL -o shot_03.mp4 "<video_url_2>"
+printf "file 'shot_01.mp4'\nfile 'shot_02.mp4'\nfile 'shot_03.mp4'\n" > concat.txt
+ffmpeg -y -f concat -safe 0 -i concat.txt -c copy concat.mp4
+
+bun add mediabunny @mediabunny/server >/dev/null 2>&1
+bun run - <<'EOF' || cp concat.mp4 final.mp4
+import { registerMediabunnyServer } from "@mediabunny/server";
+import { Conversion, FilePathSource, Input, Mp4OutputFormat, Output, BufferTarget } from "mediabunny";
+import fs from "node:fs";
+registerMediabunnyServer();
+const input = new Input({ source: new FilePathSource("concat.mp4") });
+const output = new Output({ format: new Mp4OutputFormat({ fastStart: "in-memory" }), target: new BufferTarget() });
+const conv = await Conversion.init({ input, output, video: { codec: "avc", bitrate: 5_000_000 } });
+await conv.execute();
+fs.writeFileSync("final.mp4", Buffer.from(output.target.buffer));
+EOF
+```
+
+Include `final_video_path: "/mnt/session/outputs/final.mp4"` in the manifest and require it in the rubric. The mediabunny step is best-effort — if it errors, fall back to the raw concat (`cp concat.mp4 final.mp4`) so the flow is never blocked. See `flows/pop-quiz/agents/storyboarder.yaml` for a working example.

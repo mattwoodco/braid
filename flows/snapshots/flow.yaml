@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=../../.claude/skills/braid/flow.schema.json
+name: snapshots
+brief_default: |
+  Three photos: a single cup of coffee on a wooden table near a sunny window.
+  Vary the angle and mood across the three shots.
+
+vaults:
+  - display_name: fal
+    credential:
+      display_name: Fal MCP
+      mcp_server_url: https://mcp.fal.ai/mcp
+      token_env: FAL_API_KEY
+
+memory_stores:
+  - key: styleStore
+    name: snapshots-style
+    access: read_write
+    instructions: |
+      Style notes for the snapshots flow. Read style.md before composing prompts.
+    seed:
+      mount: /mnt/memory/style
+      files: [seeds/style.md]
+    dream_instructions: |
+      Review session prompts and outcomes. Update /mnt/memory/style/style.md with
+      patterns that produced grader-passing shots. Remove guidance that led to
+      retries or failures. Keep the file under 40 lines.
+
+agents:
+  - key: photographer
+    file: agents/photographer.yaml
+    is_director: true
+    mcp_servers:
+      - { type: url, url: https://mcp.fal.ai/mcp, name: fal }
+    tools:
+      - type: agent_toolset_20260401
+        default_config: { enabled: true }
+      - type: mcp_toolset
+        mcp_server_name: fal
+        default_config:
+          enabled: true
+          permission_policy: { type: always_allow }
+
+run:
+  attach_vault: true
+  log_runs: true
+  stall_ms: 180000
+  max_restarts: 0
+  outcome:
+    description: "Three images and a manifest.json exist in /mnt/session/outputs/."
+    rubric_file: rubric.md
+    max_iterations: 1

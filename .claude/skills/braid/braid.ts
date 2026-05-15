@@ -28,6 +28,7 @@ import {
   expandBrief,
   runSentinel,
   startSseServer,
+  appendRunLog,
 } from "./lib";
 
 const SKILL_DIR = dirname(fileURLToPath(import.meta.url));
@@ -73,6 +74,7 @@ async function run(flowName: string, briefArg?: string, resumeId?: string) {
   let restartCount = 0;
   let finalSessionId = session.id;
   let agentReport = "";
+  let lastOutcome: { result?: unknown; note?: string } | null = null;
 
   while (true) {
     let finished = false;
@@ -126,7 +128,8 @@ async function run(flowName: string, briefArg?: string, resumeId?: string) {
         }
         if ((e.type as string) === "span.outcome_evaluation_end") {
           const ev = e as { result?: unknown; explanation?: string };
-          emit("outcome", { result: ev.result, note: ev.explanation?.slice(0, 200) });
+          lastOutcome = { result: ev.result, note: ev.explanation?.slice(0, 200) };
+          emit("outcome", lastOutcome);
         }
         if (e.type === "session.error") emit("error", e);
         if (e.type === "session.status_terminated") { finished = true; break; }
@@ -171,7 +174,11 @@ async function run(flowName: string, briefArg?: string, resumeId?: string) {
     writeFileSync(`${outDir}/report.md`, agentReport);
     emit("saved", `${outDir}/report.md`);
   }
-  await downloadSessionFiles(finalSessionId, outDir, emit);
+  const savedFiles = await downloadSessionFiles(finalSessionId, outDir, emit);
+  if (manifest.run?.log_runs) {
+    const logged = await appendRunLog(manifest, state, finalSessionId, brief, agentReport, lastOutcome, savedFiles);
+    if (logged) emit("runlog", logged);
+  }
   emit("done", outDir);
   stop();
 }
@@ -260,33 +267,113 @@ async function pull(flowName: string, keys: string[]) {
   await pullAgents(manifest, state, keys.length ? keys : undefined);
 }
 
-async function dream(flowName: string) {
+function parseFlags(args: string[]): { positional: string[]; flags: Record<string, string> } {
+  const positional: string[] = [];
+  const flags: Record<string, string> = {};
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a.startsWith("--")) {
+      const key = a.slice(2);
+      const next = args[i + 1];
+      if (next && !next.startsWith("--")) { flags[key] = next; i++; }
+      else flags[key] = "true";
+    } else positional.push(a);
+  }
+  return { positional, flags };
+}
+
+async function dream(flowName: string, extra: string[]) {
   const manifest = loadManifest(flowPath(flowName));
   const state = loadState(manifest.state_file);
-  if (!state.stores?.brandStore) {
-    console.log("project has no brandStore — nothing to dream over");
-    return;
+  const { flags } = parseFlags(extra);
+
+  const stores = state.stores ?? {};
+  const storeKeys = Object.keys(stores).filter((k) => k !== "runLog" || flags["store"] === "runLog");
+  if (storeKeys.length === 0) { console.log("no memory stores in state — nothing to dream over"); return; }
+
+  let storeKey = flags["store"];
+  if (!storeKey) {
+    if (storeKeys.length === 1) storeKey = storeKeys[0];
+    else {
+      console.log("\nstores:");
+      storeKeys.forEach((k, i) => console.log(`  [${i + 1}] ${k}  ${stores[k]}`));
+      const rl = createInterface({ input: stdin, output: stdout });
+      const answer = (await rl.question(`\npick [1-${storeKeys.length}] (or q): `)).trim();
+      rl.close();
+      if (answer === "q" || answer === "") return;
+      const idx = Number.parseInt(answer, 10) - 1;
+      if (!Number.isFinite(idx) || idx < 0 || idx >= storeKeys.length) {
+        console.error("invalid"); process.exit(1);
+      }
+      storeKey = storeKeys[idx];
+    }
   }
-  const recent = (state.sessions ?? []).slice(0, 20);
+  const storeId = stores[storeKey];
+  if (!storeId) { console.error(`unknown store: ${storeKey}`); process.exit(1); }
+
+  const limit = flags["sessions"] ? Number.parseInt(flags["sessions"], 10) : 20;
+  const recent = (state.sessions ?? []).slice(0, limit);
   if (recent.length === 0) { console.log("no sessions yet"); return; }
-  console.log(`dreaming over ${recent.length} session(s)...`);
-  const dream = await (c.beta as unknown as {
-    dreams: { create: (args: unknown) => Promise<{ output?: { memory_store_id?: string }; memory_store_id?: string }> };
-  }).dreams.create({
-    inputs: [
-      { type: "memory_store", memory_store_id: state.stores.brandStore },
-      { type: "sessions", session_ids: recent },
-    ],
-    model: "claude-sonnet-4-6",
-    instructions: `Review session decisions, critic scores, asset outcomes.
-Update /mnt/memory/brand/prompt-library.md: add patterns scoring >= 0.9 first try; remove < 0.7.
-Update /mnt/memory/brand/model-picks.md (create if missing): best Fal models per shot category.
-Do not modify style.md or banned-terms.md.`,
+
+  const spec = manifest.memory_stores?.find((s) => s.key === storeKey);
+  const instructions = flags["instructions"] ?? spec?.dream_instructions ??
+    `Review session decisions and outcomes. Consolidate stable patterns into the store; prune contradictions and one-off noise.`;
+
+  const model = flags["model"] ?? "claude-sonnet-4-6";
+  console.log(`dreaming over ${recent.length} session(s) -> ${storeKey} (${storeId})...`);
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
+  const res = await fetch("https://api.anthropic.com/v1/dreams", {
+    method: "POST",
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta": "managed-agents-2026-04-01,dreaming-2026-04-21",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      inputs: [
+        { type: "memory_store", memory_store_id: storeId },
+        { type: "sessions", session_ids: recent },
+      ],
+      model,
+      instructions,
+    }),
   });
-  const newId = dream?.output?.memory_store_id ?? dream?.memory_store_id ?? state.stores.brandStore;
-  state.stores.brandStore = newId;
+  const text = await res.text();
+  if (!res.ok) throw new Error(`dream create failed (${res.status}): ${text}`);
+  let dream = JSON.parse(text) as {
+    id?: string; status?: string;
+    output?: { memory_store_id?: string };
+    memory_store_id?: string;
+    outputs?: Array<{ memory_store_id?: string }>;
+  };
+  console.log(`  dream ${dream.id} status=${dream.status}`);
+
+  while (dream.id && (dream.status === "pending" || dream.status === "running")) {
+    await Bun.sleep(5000);
+    const r = await fetch(`https://api.anthropic.com/v1/dreams/${dream.id}`, {
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-beta": "managed-agents-2026-04-01,dreaming-2026-04-21",
+      },
+    });
+    const t = await r.text();
+    if (!r.ok) { console.error(`poll failed: ${t}`); break; }
+    dream = JSON.parse(t);
+    process.stdout.write(`  status=${dream.status}\n`);
+  }
+
+  const newId =
+    dream?.outputs?.[0]?.memory_store_id ??
+    dream?.output?.memory_store_id ??
+    dream?.memory_store_id ??
+    storeId;
+  state.stores![storeKey] = newId;
   saveState(manifest.state_file, state);
-  console.log(`✓ brandStore -> ${newId}`);
+  console.log(`✓ ${storeKey} -> ${newId} (${dream.status})`);
 }
 
 function usage() {
@@ -298,7 +385,8 @@ function usage() {
   braid run <flow> [brief] [sesn_id]    create or resume a session and stream
   braid sessions <flow> [--pick|--kill|--kill-all]
   braid pull <flow> [key...]            overwrite flows/<flow>/agents/*.yaml from anthropic
-  braid dream <flow>                    run a dream over tracked sessions
+  braid dream <flow> [--store K] [--instructions "..."] [--sessions N] [--model M]
+                                        run a dream over tracked sessions; consolidates into store K
   braid purge [--select]                tear down all infra
 
 Available flows: ${flows.length ? flows.join(", ") : "(none — create flows/<name>/flow.yaml)"}
@@ -320,7 +408,7 @@ try {
     case "run": await run(rest[0], rest[1] || undefined, rest[2] || undefined); break;
     case "sessions": await sessions(rest[0], rest[1]); break;
     case "pull": await pull(rest[0], rest.slice(1)); break;
-    case "dream": await dream(rest[0]); break;
+    case "dream": await dream(rest[0], rest.slice(1)); break;
     case "purge": {
       spawn("bun", ["run", resolve(SKILL_DIR, "purge.ts"), ...rest], { stdio: "inherit", cwd: REPO_ROOT })
         .on("exit", (code) => process.exit(code ?? 0));

@@ -2,7 +2,7 @@
 	"name": "braid-skill",
 	"type": "module",
 	"dependencies": {
-		"@anthropic-ai/sdk": "^0.92.0",
+		"@anthropic-ai/sdk": "^0.96.0",
 		"elysia": "latest",
 		"yaml": "^2.7.0"
 	}
