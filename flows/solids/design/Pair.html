@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Solids — Pair</title>
+<meta name="viewport" content="width=1280, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b0b0d;
+    --ink: #f3efe7;
+    --ink-dim: #8c8a85;
+    --ink-faint: #3a3936;
+    --accent: #e9d8a6;
+    --line: rgba(243,239,231,0.10);
+    --line-2: rgba(243,239,231,0.18);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+  body {
+    background: radial-gradient(120% 90% at 50% 30%, #161620 0%, #0b0b0d 60%, #060607 100%);
+    color: var(--ink);
+    font-family: "Fraunces", serif;
+    font-weight: 300;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+  body::after {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 50;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.06 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    opacity: 0.5; mix-blend-mode: overlay;
+  }
+
+  .layout {
+    position: fixed; inset: 0;
+    display: grid;
+    grid-template-rows: 72px 1fr auto;
+  }
+
+  header {
+    grid-row: 1;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 36px;
+    border-bottom: 1px solid var(--line);
+  }
+  .mono { font-family: "JetBrains Mono", monospace; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-dim); }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand-mark { width: 18px; height: 18px; border: 1px solid var(--ink); border-radius: 50%; position: relative; }
+  .brand-mark::before { content: ""; position: absolute; inset: 4px; background: var(--ink); border-radius: 50%; }
+  .brand-text { font-family: "JetBrains Mono", monospace; font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink); }
+  .breadcrumbs { display: flex; align-items: center; gap: 10px; color: var(--ink-dim); font-family: "JetBrains Mono", monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; }
+  .breadcrumbs .sep { color: var(--ink-faint); }
+  .breadcrumbs b { color: var(--ink); font-weight: 500; }
+
+  /* Stage */
+  .stage {
+    grid-row: 2;
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .slot {
+    position: relative;
+    border-right: 1px solid var(--line);
+    overflow: hidden;
+  }
+  .slot:last-child { border-right: none; }
+  .slot canvas { display: block; width: 100% !important; height: 100% !important; }
+
+  .slot-tag {
+    position: absolute; top: 22px; left: 24px;
+    display: flex; align-items: center; gap: 10px;
+    z-index: 5;
+  }
+  .slot-tag .idx {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    color: var(--ink-dim);
+    letter-spacing: 0.16em;
+  }
+  .slot-tag .name {
+    font-family: "Fraunces", serif;
+    font-size: 22px;
+    font-weight: 300;
+    color: var(--ink);
+    letter-spacing: -0.01em;
+  }
+  .slot-tag .name em { color: var(--accent); font-style: italic; font-weight: 400; }
+  .slot.active .slot-tag .name { color: var(--ink); }
+  .slot:not(.active) .slot-tag .name { color: var(--ink-dim); }
+
+  .slot-marker {
+    position: absolute; top: 22px; right: 24px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--ink-faint);
+    z-index: 5;
+  }
+  .slot.active .slot-marker { background: var(--accent); box-shadow: 0 0 16px var(--accent); }
+
+  /* Connector line + divider compass */
+  .divider-cap {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 6;
+    width: 36px; height: 36px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg);
+    border: 1px solid var(--line-2);
+    border-radius: 50%;
+    pointer-events: none;
+  }
+  .divider-cap .dot { width: 5px; height: 5px; background: var(--ink); border-radius: 50%; }
+
+  /* Info card */
+  .card-wrap {
+    grid-row: 3;
+    padding: 28px 36px 32px;
+    border-top: 1px solid var(--line);
+  }
+  .card {
+    display: grid;
+    grid-template-columns: 220px 1fr 1fr 1fr 160px;
+    align-items: end;
+    gap: 28px;
+    padding-bottom: 6px;
+  }
+  .card .group { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .card .label {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.20em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+  .card .display {
+    font-family: "Fraunces", serif;
+    font-weight: 300;
+    font-size: 48px;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    font-variation-settings: "opsz" 144;
+  }
+  .card .display em { color: var(--accent); font-style: italic; font-weight: 400; }
+  .card .row {
+    display: flex; align-items: baseline; gap: 14px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .card .row .k { color: var(--ink-dim); font-family: "JetBrains Mono", monospace; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; flex-shrink: 0; min-width: 90px; }
+  .card .row .v { color: var(--ink); font-family: "Fraunces", serif; font-size: 18px; font-weight: 400; }
+  .card .row .v em { color: var(--ink-dim); font-style: italic; font-size: 14px; margin-left: 8px; }
+
+  .card .actions { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+  .pill {
+    border: 1px solid var(--line-2);
+    color: var(--ink);
+    background: transparent;
+    padding: 12px 18px;
+    border-radius: 999px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.20em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: border-color .25s ease, background .25s ease;
+  }
+  .pill:hover { border-color: rgba(243,239,231,0.5); background: rgba(255,255,255,0.04); }
+  .pill.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .pill.primary:hover { background: var(--accent); border-color: var(--accent); }
+
+  /* Counter top right */
+  .counter { display: flex; align-items: baseline; gap: 8px; }
+  .counter .now { font-family: "Fraunces", serif; font-size: 22px; line-height: 1; }
+  .counter .sep { color: var(--ink-faint); }
+  .counter .total { color: var(--ink-dim); font-size: 12px; }
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <header>
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div class="brand-text">Solids&nbsp;·&nbsp;Vol.&nbsp;01</div>
+    </div>
+    <div class="breadcrumbs">
+      <span>Catalogue</span><span class="sep">/</span><span>Pair view</span><span class="sep">/</span><b>Plate&nbsp;03</b>
+    </div>
+    <div class="counter">
+      <span class="now">03</span><span class="sep">/</span><span class="total">06</span>
+    </div>
+  </header>
+
+  <div class="stage">
+    <div class="slot" id="slotA">
+      <div class="slot-tag">
+        <span class="idx">A · 003</span>
+        <span class="name">Dodeca<em>hedron</em></span>
+      </div>
+      <div class="slot-marker"></div>
+    </div>
+    <div class="slot active" id="slotB">
+      <div class="slot-tag">
+        <span class="idx">B · 004</span>
+        <span class="name">Octa<em>hedron</em></span>
+      </div>
+      <div class="slot-marker"></div>
+    </div>
+    <div class="divider-cap"><div class="dot"></div></div>
+  </div>
+
+  <div class="card-wrap">
+    <div class="card">
+      <div class="group">
+        <span class="label">Plate</span>
+        <span class="display">III<em>.</em></span>
+      </div>
+      <div class="group">
+        <div class="row"><span class="k">Genus</span><span class="v">Platonic <em>convex regular</em></span></div>
+      </div>
+      <div class="group">
+        <div class="row"><span class="k">F · V · E</span><span class="v">12 · 20 · 30 &nbsp; / &nbsp; 8 · 6 · 12</span></div>
+      </div>
+      <div class="group">
+        <div class="row"><span class="k">Schläfli</span><span class="v">{5, 3} &nbsp; / &nbsp; {3, 4}</span></div>
+      </div>
+      <div class="group actions">
+        <button class="pill">Specs</button>
+        <button class="pill primary">Compare →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+function makeRenderer(el) {
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(el.clientWidth, el.clientHeight);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  el.appendChild(renderer.domElement);
+  return renderer;
+}
+
+function makeScene(env) {
+  const scene = new THREE.Scene();
+  scene.environment = env;
+  const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
+  camera.position.set(0, 0, 4.6);
+  const key = new THREE.DirectionalLight(0xffffff, 1.0);
+  key.position.set(2, 3, 2);
+  scene.add(key);
+  const rim = new THREE.DirectionalLight(0xc7d2fe, 0.55);
+  rim.position.set(-2, 1, -2);
+  scene.add(rim);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.12));
+  return { scene, camera };
+}
+
+function shadowDisc() {
+  const cnv = document.createElement('canvas');
+  cnv.width = cnv.height = 256;
+  const g = cnv.getContext('2d');
+  const grad = g.createRadialGradient(128, 128, 4, 128, 128, 128);
+  grad.addColorStop(0, 'rgba(0,0,0,0.8)');
+  grad.addColorStop(0.55, 'rgba(0,0,0,0.22)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, 256, 256);
+  const tex = new THREE.CanvasTexture(cnv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(
+    new THREE.CircleGeometry(1.4, 64),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.5 })
+  );
+  m.rotation.x = -Math.PI / 2;
+  m.position.y = -1.1;
+  return m;
+}
+
+// shared env
+const pmremRenderer = new THREE.WebGLRenderer();
+const pmrem = new THREE.PMREMGenerator(pmremRenderer);
+const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+// SLOT A — Dodecahedron (jade, transmissive)
+function setupSlot(el, geo, matKind, dim) {
+  const renderer = makeRenderer(el);
+  const { scene, camera } = makeScene(envTex);
+
+  let mat;
+  if (matKind === 'jade') {
+    mat = new THREE.MeshPhysicalMaterial({
+      color: 0x4f7d6a, metalness: 0, roughness: 0.18,
+      transmission: 0.55, thickness: 1.2, ior: 1.5,
+      attenuationColor: 0x2c5447, attenuationDistance: 1.4,
+      clearcoat: 0.6, clearcoatRoughness: 0.2,
+    });
+  } else if (matKind === 'glass') {
+    mat = new THREE.MeshPhysicalMaterial({
+      color: 0xffffff, metalness: 0, roughness: 0.04,
+      transmission: 1.0, thickness: 1.0, ior: 1.45,
+      clearcoat: 1.0, clearcoatRoughness: 0.02, envMapIntensity: 1.2,
+    });
+  }
+
+  geo.center();
+  const mesh = new THREE.Mesh(geo, mat);
+  const group = new THREE.Group();
+  group.add(mesh);
+
+  // edge overlay
+  const edges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(geo, 25),
+    new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: dim ? 0.06 : 0.12 })
+  );
+  group.add(edges);
+
+  scene.add(group);
+  scene.add(shadowDisc());
+
+  const baseScale = dim ? 0.85 : 1.0;
+  group.scale.setScalar(baseScale);
+
+  function resize() {
+    const w = el.clientWidth, h = el.clientHeight;
+    renderer.setSize(w, h);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  resize();
+  new ResizeObserver(resize).observe(el);
+
+  return { renderer, scene, camera, group };
+}
+
+const a = setupSlot(document.getElementById('slotA'), new THREE.DodecahedronGeometry(1.05, 0), 'jade', true);
+const b = setupSlot(document.getElementById('slotB'), new THREE.OctahedronGeometry(1.15, 0), 'glass', false);
+
+const t0 = performance.now();
+function tick() {
+  const t = (performance.now() - t0) / 1000;
+  a.group.rotation.y = t * 0.4;
+  a.group.rotation.x = t * 0.18;
+  a.group.position.y = Math.sin(t * 0.9) * 0.04;
+
+  b.group.rotation.y = t * 0.5 + 0.6;
+  b.group.rotation.x = t * 0.22;
+  b.group.position.y = Math.sin(t * 0.9 + 1.2) * 0.05;
+
+  a.renderer.render(a.scene, a.camera);
+  b.renderer.render(b.scene, b.camera);
+  requestAnimationFrame(tick);
+}
+tick();
+</script>
+
+</body>
+</html>

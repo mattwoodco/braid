@@ -1,0 +1,63 @@
+# yaml-language-server: $schema=../../.claude/skills/braid/flow.schema.json
+name: solids
+brief_default: |
+  Build a single-page Three.js shape carousel inspired by the reference design files
+  and deploy it to Vercel. Each run must pick a NEW title that is NOT "Solids · Vol. 01".
+
+  The title MUST be a natural-language time-of-day phrase derived from the current UTC time.
+  Examples: "First Light", "Blue Hour", "Late Afternoon", "Midnight Oil", "Dawn Chorus",
+  "Witching Hour", "Golden Hour", "Cobalt Dusk", "Slow Morning". Pick one that fits the
+  actual current time, and use it in BOTH the <title> tag and the brand text in the header.
+
+  Reference design files (read all four before building):
+    Solo carousel : {{file:design/SoloCarousel.html}}
+    Pair view     : {{file:design/Pair.html}}
+    Stack view    : {{file:design/Stack.html}}
+
+  Build ONE polished HTML file that takes the Solo carousel as the base layout and folds
+  in the typographic + material direction from Pair/Stack. Use the same color tokens,
+  Fraunces + JetBrains Mono fonts, film-grain overlay, ACES tone mapping, and physical
+  materials (pearl, gold, jade, glass, copper, obsidian). It must include 6 platonic /
+  topological solids in a Three.js carousel with keyboard, wheel, drag, and dot nav.
+
+  Vercel access token: {{env:VERCEL_TOKEN}}
+
+  Deliverables (all under /mnt/session/outputs/):
+    - index.html        the full single-file site (no external project files)
+    - README.md         documents the chosen title, design source, and deployed URL
+    - manifest.json     { title, vercel_url, deployed_at }
+
+  Deploy with the Vercel CLI using the token from this message. Return the production URL
+  in your final message.
+
+vault:
+  display_name: vercel
+  credential:
+    display_name: Vercel MCP
+    mcp_server_url: https://mcp.vercel.com
+    token_env: VERCEL_TOKEN
+
+agents:
+  - key: builder
+    file: agents/builder.yaml
+    is_director: true
+    mcp_servers:
+      - { type: url, url: https://mcp.vercel.com, name: vercel }
+    tools:
+      - type: agent_toolset_20260401
+        default_config: { enabled: true }
+      - type: mcp_toolset
+        mcp_server_name: vercel
+        default_config:
+          enabled: true
+          permission_policy: { type: always_allow }
+
+run:
+  attach_vault: true
+  attach_stores: false
+  stall_ms: 240000
+  max_restarts: 1
+  outcome:
+    description: "A deployed Three.js shape carousel at a Vercel URL with a fresh time-of-day title."
+    rubric_file: rubric.md
+    max_iterations: 2

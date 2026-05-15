@@ -1,0 +1,69 @@
+# yaml-language-server: $schema=../../.claude/skills/braid/flow.schema.json
+name: ad
+env_name: braid-ad-generator
+state_file: state.json
+output_dir: outputs/ads
+brief_default: "60s viral ad for an indie hiking boot brand"
+
+vault:
+  display_name: fal
+  credential:
+    display_name: Fal MCP
+    mcp_server_url: https://mcp.fal.ai/mcp
+    token_env: FAL_API_KEY
+
+memory_stores:
+  - key: brandStore
+    name: brand
+    access: read_only
+    instructions: "Brand guide. Read first; never modify."
+    seed:
+      mount: /mnt/memory/brand
+      files:
+        - brand/style.md
+        - brand/prompt-library.md
+        - brand/banned-terms.md
+  - key: projectStore
+    name: project
+    access: read_write
+    instructions: "Project state. Append shot decisions and asset URLs."
+  - key: cacheStore
+    name: cache
+    access: read_write
+    instructions: "sha256(prompt) -> fal result cache. Check before generating; write after."
+
+agents:
+  - key: critic
+    file: agents/critic.yaml
+  - key: sentinel
+    file: agents/sentinel.yaml
+  - key: producer
+    file: agents/producer.yaml
+    mcp_servers:
+      - type: url
+        url: https://mcp.fal.ai/mcp
+        name: fal
+    tools:
+      - type: agent_toolset_20260401
+        default_config: { enabled: true }
+      - type: mcp_toolset
+        mcp_server_name: fal
+        default_config:
+          enabled: true
+          permission_policy: { type: always_allow }
+  - key: director
+    file: agents/director.yaml
+    is_director: true
+    coordinator: [producer, critic]
+
+sentinel_key: sentinel
+
+run:
+  attach_vault: true
+  attach_stores: true
+  stall_ms: 180000
+  max_restarts: 2
+  outcome:
+    description: "Approved shot manifest at /mnt/session/outputs/manifest.json"
+    rubric_file: rubric.md
+    max_iterations: 2

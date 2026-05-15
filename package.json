@@ -1,0 +1,9 @@
+{
+	"name": "braid",
+	"type": "module",
+	"dependencies": {
+		"@anthropic-ai/sdk": "^0.96.0",
+		"elysia": "latest",
+		"yaml": "^2.9.0"
+	}
+}

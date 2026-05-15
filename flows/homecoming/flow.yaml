@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=../../.claude/skills/braid/flow.schema.json
+name: homecoming
+brief_default: |
+  Build a one-page fundraiser site for "Welcome Them Home" — supporting the training and placement of service dogs with returning veterans.
+
+  The page features THREE looping hero videos in sequence (a 3-shot emotional arc: ear-twitch at the door → tail-thunder mid-hallway → tackle-embrace on the porch) and a prominent "Support Veteran Service Dogs" button linking to https://example.com/donate.
+
+  Vercel access token: {{env:VERCEL_TOKEN}}
+
+vaults:
+  - display_name: fal
+    credential:
+      display_name: Fal MCP
+      mcp_server_url: https://mcp.fal.ai/mcp
+      token_env: FAL_API_KEY
+
+agents:
+  - key: videographer
+    file: agents/videographer.yaml
+    mcp_servers:
+      - type: url
+        url: https://mcp.fal.ai/mcp
+        name: fal
+    tools:
+      - type: agent_toolset_20260401
+        default_config: { enabled: true }
+      - type: mcp_toolset
+        mcp_server_name: fal
+        default_config:
+          enabled: true
+          permission_policy: { type: always_allow }
+  - key: web_builder
+    file: agents/web-builder.yaml
+  - key: director
+    file: agents/director.yaml
+    is_director: true
+    coordinator: [videographer, web_builder]
+
+run:
+  attach_vault: true
+  stall_ms: 240000
+  max_restarts: 1
+  outcome:
+    description: "Manifest at /mnt/session/outputs/manifest.json with 3 reachable video_urls and reachable page_url containing 3 video elements and a 'Support Veteran Service Dogs' button."
+    rubric_file: rubric.md
+    max_iterations: 1

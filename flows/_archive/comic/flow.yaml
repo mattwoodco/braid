@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../.claude/skills/braid/flow.schema.json
+name: comic
+env_name: braid-comic-generator
+state_file: state.json
+output_dir: outputs/comics
+brief_default: "A raccoon detective solves the case of the missing trash can — 1 page, 3 panels"
+
+vault:
+  display_name: fal-comic
+  credential:
+    display_name: Fal MCP
+    mcp_server_url: https://mcp.fal.ai/mcp
+    token_env: FAL_API_KEY
+
+agents:
+  - key: plotter
+    file: agents/plotter.yaml
+  - key: illustrator
+    file: agents/illustrator.yaml
+  - key: director
+    file: agents/director.yaml
+    is_director: true
+    coordinator: [plotter, illustrator]
+
+run:
+  attach_vault: true

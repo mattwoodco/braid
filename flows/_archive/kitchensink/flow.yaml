@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../.claude/skills/braid/flow.schema.json
+name: kitchensink
+brief_default: "Scene: the creature arrives at the community centre, sets up the film-editing workspace on a folding table, focuses on splicing 35mm film while the elderly onlookers watch, then holds the finished edit up to the lightbox."
+
+vault:
+  display_name: fal-kitchensink
+  credential:
+    display_name: Fal MCP
+    mcp_server_url: https://mcp.fal.ai/mcp
+    token_env: FAL_API_KEY
+
+agents:
+  - key: storyboarder
+    file: agents/storyboarder.yaml
+
+run:
+  attach_vault: true
+  stall_ms: 120000
+  max_restarts: 0
+  outcome:
+    description: "Storyboard manifest at /mnt/session/outputs/manifest.json with 6 stills and 6 motion clips, all asset URLs reachable."
+    max_iterations: 1

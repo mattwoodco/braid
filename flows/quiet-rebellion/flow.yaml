@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=../../.claude/skills/braid/flow.schema.json
+name: quiet-rebellion
+brief_default: |
+  Build a one-page site for "Adopt an Acre" — a quiet-rebellion fundraiser to protect Pacific Northwest scrubland from clearcut.
+
+  The page features THREE looping hero videos in sequence (a 3-shot arc: weathered hands on a sapling → wide lone figure in a cleared field with bulldozer tracks → first leaf catching wind at dawn) and a prominent "Adopt an Acre" button linking to https://example.com/donate.
+
+  Vercel access token: {{env:VERCEL_TOKEN}}
+
+vaults:
+  - display_name: fal
+    credential:
+      display_name: Fal MCP
+      mcp_server_url: https://mcp.fal.ai/mcp
+      token_env: FAL_API_KEY
+
+agents:
+  - key: videographer
+    file: agents/videographer.yaml
+    mcp_servers:
+      - type: url
+        url: https://mcp.fal.ai/mcp
+        name: fal
+    tools:
+      - type: agent_toolset_20260401
+        default_config: { enabled: true }
+      - type: mcp_toolset
+        mcp_server_name: fal
+        default_config:
+          enabled: true
+          permission_policy: { type: always_allow }
+  - key: web_builder
+    file: agents/web-builder.yaml
+  - key: director
+    file: agents/director.yaml
+    is_director: true
+    coordinator: [videographer, web_builder]
+
+run:
+  attach_vault: true
+  stall_ms: 240000
+  max_restarts: 1
+  outcome:
+    description: "Manifest at /mnt/session/outputs/manifest.json with 3 reachable video_urls and reachable page_url containing 3 video elements and an 'Adopt an Acre' button."
+    rubric_file: rubric.md
+    max_iterations: 1

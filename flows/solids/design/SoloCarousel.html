@@ -1,0 +1,777 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Solids — A carousel of forms</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b0b0d;
+    --bg-2: #131318;
+    --ink: #f3efe7;
+    --ink-dim: #8c8a85;
+    --ink-faint: #3a3936;
+    --accent: #e9d8a6;
+    --line: rgba(243, 239, 231, 0.10);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+  body {
+    background: radial-gradient(120% 90% at 50% 40%, #161620 0%, #0b0b0d 60%, #060607 100%);
+    color: var(--ink);
+    font-family: "Fraunces", ui-serif, Georgia, serif;
+    font-weight: 300;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* film grain */
+  body::after {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1   0 0 0 0 1   0 0 0 0 1   0 0 0 0.06 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    opacity: 0.5;
+    mix-blend-mode: overlay;
+    z-index: 50;
+  }
+
+  #stage {
+    position: fixed; inset: 0;
+    z-index: 1;
+  }
+  #stage canvas { display: block; width: 100% !important; height: 100% !important; }
+
+  /* Header bar */
+  header {
+    position: fixed; top: 0; left: 0; right: 0;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 28px 36px;
+    z-index: 20;
+    pointer-events: none;
+  }
+  .mono {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+  .brand {
+    display: flex; align-items: center; gap: 12px;
+    pointer-events: auto;
+  }
+  .brand-mark {
+    width: 22px; height: 22px;
+    border: 1px solid var(--ink);
+    border-radius: 50%;
+    position: relative;
+  }
+  .brand-mark::before {
+    content: ""; position: absolute; inset: 4px;
+    background: var(--ink);
+    border-radius: 50%;
+    transform-origin: center;
+    animation: pulseDot 4s ease-in-out infinite;
+  }
+  @keyframes pulseDot {
+    0%, 100% { transform: scale(0.6); opacity: 0.7; }
+    50%      { transform: scale(1.0); opacity: 1; }
+  }
+  .brand-text { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink); }
+
+  .counter {
+    display: flex; align-items: baseline; gap: 8px;
+    pointer-events: auto;
+  }
+  .counter .now {
+    font-family: "Fraunces", serif;
+    font-size: 28px; font-weight: 300;
+    color: var(--ink);
+    font-feature-settings: "tnum" 1;
+    line-height: 1;
+  }
+  .counter .sep { color: var(--ink-faint); font-size: 14px; }
+  .counter .total { color: var(--ink-dim); font-size: 14px; font-feature-settings: "tnum" 1; }
+
+  /* Footer / nav */
+  footer {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    padding: 28px 36px 40px;
+    z-index: 20;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: end;
+    gap: 24px;
+  }
+
+  .meta-left { display: flex; flex-direction: column; gap: 6px; }
+  .meta-left .label { color: var(--ink-dim); }
+  .meta-left .value { font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 0.06em; color: var(--ink); }
+
+  .name-block {
+    text-align: center;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    min-width: 0;
+  }
+  .name-kicker {
+    color: var(--ink-dim);
+  }
+  .name-stage {
+    position: relative;
+    height: 92px;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  .name {
+    font-family: "Fraunces", serif;
+    font-weight: 300;
+    font-size: clamp(48px, 7vw, 96px);
+    line-height: 1;
+    letter-spacing: -0.02em;
+    font-variation-settings: "opsz" 144;
+    white-space: nowrap;
+    position: absolute;
+    will-change: transform, opacity;
+  }
+  .name em { font-style: italic; color: var(--accent); font-weight: 400; }
+
+  .nav-right { display: flex; justify-content: flex-end; align-items: center; gap: 14px; }
+
+  .arrow {
+    width: 56px; height: 56px;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    background: rgba(255,255,255,0.02);
+    color: var(--ink);
+    display: inline-flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: border-color .25s ease, background .25s ease, transform .25s ease, color .25s ease;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .arrow:hover { border-color: rgba(243,239,231,0.6); background: rgba(255,255,255,0.05); }
+  .arrow:active { transform: scale(0.94); }
+  .arrow svg { width: 18px; height: 18px; }
+  .arrow.disabled { opacity: 0.25; pointer-events: none; }
+
+  /* Dots row */
+  .dots {
+    position: fixed;
+    left: 50%; bottom: 175px;
+    transform: translateX(-50%);
+    display: flex; gap: 10px; z-index: 20;
+  }
+  .dot {
+    appearance: none;
+    border: none; padding: 0;
+    width: 28px; height: 2px;
+    background: var(--ink-faint);
+    cursor: pointer;
+    transition: background .35s ease, width .35s ease;
+  }
+  .dot.active { background: var(--ink); width: 48px; }
+  .dot:hover { background: var(--ink-dim); }
+
+  /* Hint */
+  .hint {
+    position: fixed;
+    left: 50%; top: 28px;
+    transform: translateX(-50%);
+    color: var(--ink-faint);
+    z-index: 20;
+    pointer-events: none;
+    transition: opacity 0.6s ease;
+  }
+  .hint .kbd {
+    display: inline-block;
+    border: 1px solid var(--ink-faint);
+    padding: 1px 6px;
+    margin: 0 2px;
+    border-radius: 3px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    color: var(--ink-dim);
+  }
+
+  /* Loading veil */
+  #loader {
+    position: fixed; inset: 0;
+    background: #0b0b0d;
+    z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+    transition: opacity 0.8s ease;
+  }
+  #loader.hide { opacity: 0; pointer-events: none; }
+  #loader .lo {
+    width: 32px; height: 32px;
+    border: 1px solid var(--ink-faint);
+    border-top-color: var(--ink);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Cursor affordance over canvas */
+  #stage { cursor: grab; }
+  #stage.dragging { cursor: grabbing; }
+
+  @media (max-width: 700px) {
+    header { padding: 20px 20px; }
+    footer { padding: 20px 20px 30px; grid-template-columns: auto 1fr auto; }
+    .meta-left { display: none; }
+    .dots { bottom: 150px; }
+    .name-stage { height: 64px; }
+    .arrow { width: 48px; height: 48px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="loader"><div class="lo"></div></div>
+
+<div id="stage"></div>
+
+<header>
+  <div class="brand">
+    <div class="brand-mark"></div>
+    <div class="brand-text">Solids&nbsp;·&nbsp;Vol.&nbsp;01</div>
+  </div>
+  <div class="counter">
+    <span class="now mono-num" id="cur">01</span>
+    <span class="sep">/</span>
+    <span class="total" id="tot">06</span>
+  </div>
+</header>
+
+<div class="hint" id="hint">
+  <span class="mono">drag · scroll · <span class="kbd">←</span> <span class="kbd">→</span></span>
+</div>
+
+<div class="dots" id="dots"></div>
+
+<footer>
+  <div class="meta-left">
+    <span class="label mono" id="metaLabel">Genus</span>
+    <span class="value" id="metaValue">— / —</span>
+  </div>
+  <div class="name-block">
+    <span class="name-kicker mono">Specimen</span>
+    <div class="name-stage" id="nameStage"></div>
+  </div>
+  <div class="nav-right">
+    <button class="arrow" id="prev" aria-label="Previous">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <button class="arrow" id="next" aria-label="Next">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M9 5l7 7-7 7"/></svg>
+    </button>
+  </div>
+</footer>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+// ============================================================
+// SHAPES
+// ============================================================
+const SHAPES = [
+  {
+    name: 'Icosa',
+    italicTail: 'hedron',
+    meta: { label: 'Faces · Vertices · Edges', value: '20 · 12 · 30' },
+    make: () => new THREE.IcosahedronGeometry(1.0, 0),
+    material: 'pearl',
+    spin: [0.0025, 0.0040, 0.0008],
+  },
+  {
+    name: 'Torus',
+    italicTail: ' Knot',
+    meta: { label: 'Curve · (p, q)', value: '(2, 3)' },
+    make: () => new THREE.TorusKnotGeometry(0.62, 0.22, 220, 32, 2, 3),
+    material: 'gold',
+    spin: [0.002, 0.005, 0.001],
+  },
+  {
+    name: 'Dodeca',
+    italicTail: 'hedron',
+    meta: { label: 'Faces · Vertices · Edges', value: '12 · 20 · 30' },
+    make: () => new THREE.DodecahedronGeometry(1.05, 0),
+    material: 'jade',
+    spin: [0.0018, 0.0033, 0.0006],
+  },
+  {
+    name: 'Octa',
+    italicTail: 'hedron',
+    meta: { label: 'Faces · Vertices · Edges', value: '8 · 6 · 12' },
+    make: () => new THREE.OctahedronGeometry(1.15, 0),
+    material: 'glass',
+    spin: [0.0022, 0.0042, 0.0008],
+  },
+  {
+    name: 'Torus',
+    italicTail: '',
+    meta: { label: 'Radius · Tube', value: '0.80 · 0.28' },
+    make: () => new THREE.TorusGeometry(0.80, 0.28, 64, 220),
+    material: 'copper',
+    spin: [0.003, 0.0035, 0.0009],
+  },
+  {
+    name: 'Tetra',
+    italicTail: 'hedron',
+    meta: { label: 'Faces · Vertices · Edges', value: '4 · 4 · 6' },
+    make: () => new THREE.TetrahedronGeometry(1.25, 0),
+    material: 'obsidian',
+    spin: [0.0024, 0.0046, 0.0010],
+  },
+];
+
+// ============================================================
+// SCENE
+// ============================================================
+const stageEl = document.getElementById('stage');
+const W = () => stageEl.clientWidth;
+const H = () => stageEl.clientHeight;
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(W(), H());
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+stageEl.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(35, W() / H(), 0.1, 100);
+camera.position.set(0, 0.05, 4.6);
+
+// PMREM environment for crisp reflections
+const pmrem = new THREE.PMREMGenerator(renderer);
+const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environment = envTex;
+
+// Lights — supplement env for highlights
+const key = new THREE.DirectionalLight(0xffffff, 1.2);
+key.position.set(2.4, 3.0, 2.0);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0xc7d2fe, 0.6);
+rim.position.set(-2.5, 1.0, -2.0);
+scene.add(rim);
+const amb = new THREE.AmbientLight(0xffffff, 0.12);
+scene.add(amb);
+
+// Subtle ground pedestal — a circular soft shadow disc
+const shadowGeo = new THREE.CircleGeometry(1.6, 64);
+const shadowMat = new THREE.MeshBasicMaterial({
+  transparent: true,
+  opacity: 0.55,
+  depthWrite: false,
+});
+// Make a radial gradient texture for the shadow
+{
+  const cnv = document.createElement('canvas');
+  cnv.width = cnv.height = 256;
+  const g = cnv.getContext('2d');
+  const grad = g.createRadialGradient(128, 128, 4, 128, 128, 128);
+  grad.addColorStop(0.0, 'rgba(0,0,0,0.85)');
+  grad.addColorStop(0.55, 'rgba(0,0,0,0.25)');
+  grad.addColorStop(1.0, 'rgba(0,0,0,0.0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 256, 256);
+  const tex = new THREE.CanvasTexture(cnv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  shadowMat.map = tex;
+  shadowMat.color.set(0xffffff);
+}
+const shadowDisc = new THREE.Mesh(shadowGeo, shadowMat);
+shadowDisc.rotation.x = -Math.PI / 2;
+shadowDisc.position.y = -1.2;
+scene.add(shadowDisc);
+
+// ============================================================
+// MATERIALS
+// ============================================================
+function makeMaterial(kind) {
+  switch (kind) {
+    case 'pearl':
+      return new THREE.MeshPhysicalMaterial({
+        color: 0xf3efe7,
+        metalness: 0.15,
+        roughness: 0.22,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.18,
+        iridescence: 0.6,
+        iridescenceIOR: 1.3,
+        envMapIntensity: 1.0,
+      });
+    case 'gold':
+      return new THREE.MeshPhysicalMaterial({
+        color: 0xe9d8a6,
+        metalness: 1.0,
+        roughness: 0.22,
+        envMapIntensity: 1.2,
+      });
+    case 'jade':
+      return new THREE.MeshPhysicalMaterial({
+        color: 0x4f7d6a,
+        metalness: 0.0,
+        roughness: 0.18,
+        transmission: 0.55,
+        thickness: 1.2,
+        ior: 1.5,
+        attenuationColor: 0x2c5447,
+        attenuationDistance: 1.4,
+        clearcoat: 0.6,
+        clearcoatRoughness: 0.2,
+        envMapIntensity: 1.0,
+      });
+    case 'glass':
+      return new THREE.MeshPhysicalMaterial({
+        color: 0xffffff,
+        metalness: 0.0,
+        roughness: 0.04,
+        transmission: 1.0,
+        thickness: 1.0,
+        ior: 1.45,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.02,
+        envMapIntensity: 1.2,
+      });
+    case 'copper':
+      return new THREE.MeshPhysicalMaterial({
+        color: 0xc97b5c,
+        metalness: 1.0,
+        roughness: 0.32,
+        envMapIntensity: 1.1,
+      });
+    case 'obsidian':
+      return new THREE.MeshPhysicalMaterial({
+        color: 0x12131a,
+        metalness: 0.85,
+        roughness: 0.15,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.05,
+        envMapIntensity: 1.0,
+      });
+  }
+}
+
+// ============================================================
+// SHAPE OBJECTS
+// ============================================================
+const shapeMeshes = SHAPES.map((s) => {
+  const group = new THREE.Group();
+  const geo = s.make();
+  geo.center();
+  const mat = makeMaterial(s.material);
+  const mesh = new THREE.Mesh(geo, mat);
+  group.add(mesh);
+
+  // Add a faint wireframe overlay for visual interest on metallics
+  if (s.material === 'gold' || s.material === 'copper' || s.material === 'obsidian') {
+    const edges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(geo, 25),
+      new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.08 })
+    );
+    group.add(edges);
+  }
+
+  group.visible = false;
+  scene.add(group);
+  return { group, mesh, spin: s.spin };
+});
+
+// ============================================================
+// CAROUSEL STATE + TRANSITION
+// ============================================================
+let index = 0;
+let prevIndex = 0;
+let transition = { active: false, t: 0, dir: 1 };
+
+const TRANS_MS = 850;
+
+function setActive(i, dir) {
+  if (transition.active) return;
+  if (i === index) return;
+  prevIndex = index;
+  index = (i + SHAPES.length) % SHAPES.length;
+  transition.active = true;
+  transition.t = 0;
+  transition.dir = dir;
+  transition.startTime = performance.now();
+  shapeMeshes[prevIndex].group.visible = true;
+  shapeMeshes[index].group.visible = true;
+  updateChrome();
+}
+
+function next() { setActive(index + 1, +1); }
+function prev() { setActive(index - 1, -1); }
+
+// ============================================================
+// CHROME (DOM)
+// ============================================================
+const cur = document.getElementById('cur');
+const tot = document.getElementById('tot');
+const dotsEl = document.getElementById('dots');
+const nameStage = document.getElementById('nameStage');
+const metaLabel = document.getElementById('metaLabel');
+const metaValue = document.getElementById('metaValue');
+const prevBtn = document.getElementById('prev');
+const nextBtn = document.getElementById('next');
+
+tot.textContent = String(SHAPES.length).padStart(2, '0');
+
+// Build dots
+SHAPES.forEach((_, i) => {
+  const b = document.createElement('button');
+  b.className = 'dot' + (i === 0 ? ' active' : '');
+  b.setAttribute('aria-label', `Go to shape ${i + 1}`);
+  b.addEventListener('click', () => {
+    if (i === index) return;
+    setActive(i, i > index ? +1 : -1);
+  });
+  dotsEl.appendChild(b);
+});
+
+// Build initial name spans (one per shape, stacked, animated in/out)
+const nameSpans = SHAPES.map((s, i) => {
+  const span = document.createElement('span');
+  span.className = 'name';
+  span.innerHTML = `${escape(s.name)}<em>${escape(s.italicTail)}</em>`;
+  span.style.opacity = i === 0 ? '1' : '0';
+  span.style.transform = 'translateX(0px)';
+  nameStage.appendChild(span);
+  return span;
+});
+
+function escape(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+let lastIdxForChrome = -1;
+function updateChrome() {
+  // counter
+  cur.textContent = String(index + 1).padStart(2, '0');
+  // dots
+  dotsEl.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('active', i === index));
+  // meta
+  const m = SHAPES[index].meta;
+  metaLabel.textContent = m.label;
+  metaValue.textContent = m.value;
+  lastIdxForChrome = index;
+}
+
+function animateNameSwap(fromIdx, toIdx, dir) {
+  const from = nameSpans[fromIdx];
+  const to   = nameSpans[toIdx];
+  const dist = 90;
+  // Initial states
+  to.style.transition = 'none';
+  to.style.opacity = '0';
+  to.style.transform = `translateX(${dir > 0 ? dist : -dist}px)`;
+  // Force layout
+  void to.offsetWidth;
+  // Animate
+  const ease = 'cubic-bezier(.22, 1, .36, 1)';
+  from.style.transition = `transform 700ms ${ease}, opacity 500ms ease`;
+  to.style.transition   = `transform 800ms ${ease}, opacity 600ms ease 80ms`;
+  from.style.opacity = '0';
+  from.style.transform = `translateX(${dir > 0 ? -dist : dist}px)`;
+  to.style.opacity = '1';
+  to.style.transform = `translateX(0px)`;
+}
+
+updateChrome();
+
+// ============================================================
+// INPUT
+// ============================================================
+prevBtn.addEventListener('click', prev);
+nextBtn.addEventListener('click', next);
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowLeft') prev();
+  else if (e.key === 'ArrowRight') next();
+});
+
+// Wheel
+let wheelLock = false;
+window.addEventListener('wheel', (e) => {
+  if (wheelLock) return;
+  if (Math.abs(e.deltaY) < 8 && Math.abs(e.deltaX) < 8) return;
+  const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+  if (d > 0) next(); else prev();
+  wheelLock = true;
+  setTimeout(() => wheelLock = false, 700);
+}, { passive: true });
+
+// Pointer drag
+let dragStart = null;
+let dragDX = 0;
+stageEl.addEventListener('pointerdown', (e) => {
+  dragStart = { x: e.clientX, y: e.clientY };
+  stageEl.classList.add('dragging');
+  stageEl.setPointerCapture?.(e.pointerId);
+  // hide hint after first interaction
+  document.getElementById('hint').style.opacity = '0';
+});
+stageEl.addEventListener('pointermove', (e) => {
+  if (!dragStart) return;
+  dragDX = e.clientX - dragStart.x;
+});
+function endDrag() {
+  if (!dragStart) return;
+  stageEl.classList.remove('dragging');
+  if (Math.abs(dragDX) > 70) {
+    if (dragDX < 0) next(); else prev();
+  }
+  dragStart = null;
+  dragDX = 0;
+}
+stageEl.addEventListener('pointerup', endDrag);
+stageEl.addEventListener('pointercancel', endDrag);
+stageEl.addEventListener('pointerleave', endDrag);
+
+// hide hint after a few seconds anyway
+setTimeout(() => { document.getElementById('hint').style.opacity = '0'; }, 6000);
+
+// ============================================================
+// ANIMATE
+// ============================================================
+const clock = new THREE.Clock();
+
+// initial visibility
+shapeMeshes[0].group.visible = true;
+
+// Track DOM-side last index to fire name swap once per transition start
+let pendingNameSwap = null;
+function startTransition() {
+  pendingNameSwap = { from: prevIndex, to: index, dir: transition.dir };
+  animateNameSwap(pendingNameSwap.from, pendingNameSwap.to, pendingNameSwap.dir);
+}
+
+// Hook into setActive to trigger name swap
+const _orig = setActive;
+// We replace by augmenting: easier to just refactor — but here just listen via wrapper:
+(() => {
+  // Patch setActive by re-binding the buttons through a small layer
+})();
+
+// Instead, simpler: monitor transition start.
+let wasActive = false;
+function checkTransitionStart() {
+  if (transition.active && !wasActive) {
+    startTransition();
+  }
+  wasActive = transition.active;
+}
+
+function easeInOut(t) {
+  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta();
+  const time = clock.elapsedTime;
+
+  checkTransitionStart();
+
+  // Per-shape rotation
+  shapeMeshes.forEach((s, i) => {
+    s.group.rotation.x += s.spin[0];
+    s.group.rotation.y += s.spin[1];
+    s.group.rotation.z += s.spin[2];
+  });
+
+  // Idle bob
+  const bob = Math.sin(time * 0.9) * 0.04;
+
+  // Position shapes for transition
+  if (transition.active) {
+    const elapsed = performance.now() - transition.startTime;
+    const t = Math.min(1, elapsed / TRANS_MS);
+    const e = easeInOut(t);
+
+    const dir = transition.dir;
+    const offset = 3.6; // travel distance in world units
+    const arc = 0.8;    // vertical lift in middle of arc
+
+    // Outgoing: from 0 -> -dir * offset
+    const outX = e * (-dir) * offset;
+    const outY = bob - Math.sin(e * Math.PI) * arc * 0.35; // small dip down
+    const outS = THREE.MathUtils.lerp(1.0, 0.7, e);
+    shapeMeshes[prevIndex].group.position.set(outX, outY, 0);
+    shapeMeshes[prevIndex].group.scale.setScalar(outS);
+
+    // Incoming: from +dir * offset -> 0
+    const inT = e;
+    const inX = (1 - inT) * dir * offset;
+    const inY = bob + Math.sin((1 - inT) * Math.PI) * arc * 0.35;
+    const inS = THREE.MathUtils.lerp(0.7, 1.0, e);
+    shapeMeshes[index].group.position.set(inX, inY, 0);
+    shapeMeshes[index].group.scale.setScalar(inS);
+
+    // Shadow scales with active mesh
+    const shadowS = THREE.MathUtils.lerp(0.6, 1.0, e);
+    shadowDisc.scale.setScalar(shadowS);
+    shadowMat.opacity = THREE.MathUtils.lerp(0.35, 0.55, e);
+
+    if (t >= 1) {
+      transition.active = false;
+      shapeMeshes[prevIndex].group.visible = false;
+      shapeMeshes[prevIndex].group.position.set(0, 0, 0);
+      shapeMeshes[prevIndex].group.scale.setScalar(1);
+    }
+  } else {
+    // idle
+    const m = shapeMeshes[index];
+    m.group.position.set(0, bob, 0);
+    m.group.scale.setScalar(1.0);
+    // drag preview: shift slightly with current drag delta
+    if (dragStart) {
+      const sx = THREE.MathUtils.clamp(dragDX / 220, -0.5, 0.5);
+      m.group.position.x = sx * 0.7;
+      m.group.rotation.y += sx * 0.002;
+    }
+    shadowDisc.scale.setScalar(1.0);
+    shadowMat.opacity = 0.55;
+  }
+
+  renderer.render(scene, camera);
+}
+
+// Resize
+function onResize() {
+  renderer.setSize(W(), H());
+  camera.aspect = W() / H();
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', onResize);
+
+// Wait for fonts then reveal
+(async () => {
+  try { await document.fonts.ready; } catch (e) {}
+  document.getElementById('loader').classList.add('hide');
+  setTimeout(() => document.getElementById('loader').remove(), 900);
+  animate();
+})();
+
+</script>
+</body>
+</html>

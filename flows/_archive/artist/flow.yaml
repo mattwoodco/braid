@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=../../.claude/skills/braid/flow.schema.json
+name: artist
+env_name: braid-artist
+state_file: state.json
+output_dir: outputs/artist
+brief_default: "a small calico cat sleeping on a stack of books, soft warm lighting"
+
+vault:
+  display_name: fal-artist
+  credential:
+    display_name: Fal MCP
+    mcp_server_url: https://mcp.fal.ai/mcp
+    token_env: FAL_API_KEY
+
+memory_stores:
+  - key: galleryStore
+    name: gallery
+    access: read_write
+    instructions: "Generated images. Append one JSON record per run under /mnt/memory/gallery/."
+
+agents:
+  - key: artist
+    file: agents/artist.yaml
+    is_director: true
+
+run:
+  attach_vault: true
+  attach_stores: true

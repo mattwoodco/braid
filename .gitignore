@@ -1,0 +1,7 @@
+.env*.local
+flows/*/state.json
+flows/*/outputs/
+outputs/
+node_modules/
+_docs
+.DS_Store
