@@ -23,11 +23,11 @@
 - [ ] `bun run schema:check` — all `flows/*/flow.yaml` validate (once Slice 30 lands)
 - [ ] Manual smoke: at least one shipped flow still runs end-to-end
 
-## Plan-ledger reference
+## Issue reference
 
 <!-- Private audit anchors live in docs/audit-*.PRIVATE.md. Do NOT list them here. -->
 
-Closes plan-node `XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX`.
+Closes #ISSUE_NUMBER
 
 ## Dependency
 

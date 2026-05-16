@@ -57,4 +57,4 @@ Any pattern that defeats one of the above is a vulnerability — even if it's "c
 
 ---
 
-*Policy last updated 2026-05-15. Memento decision `e6984cc3`.*
+*Policy last updated 2026-05-15. See [docs/decisions/0001-disclosure-posture.md](docs/decisions/0001-disclosure-posture.md) for rationale.*
