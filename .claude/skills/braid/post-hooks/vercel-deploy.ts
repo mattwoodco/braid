@@ -136,21 +136,29 @@ async function main(): Promise<void> {
 
   console.log(`deploying ${siteDir} as ${projectName}...`);
 
-  // Token via env, NOT --token arg (CVE-2026-44479 — Vercel CLI < 52.0.1
+  // Token via env, NOT --token arg (CVE-2026-44479 — Vercel CLI < 52.0.0
   // included CLI args verbatim in suggested-command output, leaking tokens).
   // Pin to a CVE-patched version explicitly; never use `vercel@latest`.
+  // npm has no 52.0.1 (registry jumps 52.0.0 → 52.2.0); use 52.2.0 as the
+  // first post-CVE release available on npm.
+  const cmd = [
+    "npx",
+    "--yes",
+    "vercel@52.2.0",
+    "deploy",
+    "--prod",
+    "--yes",
+    "--name",
+    projectName,
+  ];
+  // Non-interactive deploys without a pre-linked project require an explicit
+  // scope. Opt-in via VERCEL_SCOPE in env_passthrough; if absent, the CLI
+  // surfaces a clear missing_scope error.
+  const scope = process.env.VERCEL_SCOPE;
+  if (scope) cmd.push("--scope", scope);
+  cmd.push(siteDir);
   const proc = Bun.spawnSync({
-    cmd: [
-      "npx",
-      "--yes",
-      "vercel@52.0.1",
-      "deploy",
-      "--prod",
-      "--yes",
-      "--name",
-      projectName,
-      siteDir,
-    ],
+    cmd,
     env: { ...process.env },
     stdout: "pipe",
     stderr: "pipe",
