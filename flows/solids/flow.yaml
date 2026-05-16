@@ -1,8 +1,9 @@
 # yaml-language-server: $schema=../../.claude/skills/braid/flow.schema.json
 name: solids
 brief_default: |
-  Build a single-page Three.js shape carousel inspired by the reference design files
-  and deploy it to Vercel. Each run must pick a NEW title that is NOT "Solids · Vol. 01".
+  Build a single-page Three.js shape carousel inspired by the reference design files.
+  You DO NOT deploy. The host runs the Vercel deploy after this session ends, using
+  the manifest you write. Each run must pick a NEW title that is NOT "Solids · Vol. 01".
 
   The title MUST be a natural-language time-of-day phrase derived from the current UTC time.
   Examples: "First Light", "Blue Hour", "Late Afternoon", "Midnight Oil", "Dawn Chorus",
@@ -20,15 +21,24 @@ brief_default: |
   materials (pearl, gold, jade, glass, copper, obsidian). It must include 6 platonic /
   topological solids in a Three.js carousel with keyboard, wheel, drag, and dot nav.
 
-  Vercel access token: {{env:VERCEL_TOKEN}}
-
-  Deliverables (all under /mnt/session/outputs/):
+  Deliverables (all under /mnt/session/outputs/site/):
     - index.html        the full single-file site (no external project files)
-    - README.md         documents the chosen title, design source, and deployed URL
-    - manifest.json     { title, vercel_url, deployed_at }
+    - README.md         documents the chosen title and design source
 
-  Deploy with the Vercel CLI using the token from this message. Return the production URL
-  in your final message.
+  Also write /mnt/session/outputs/manifest.json:
+    { "title": "<chosen title>", "site_dir": "site",
+      "project_name": "solids-<slug>", "ready_to_deploy": true }
+
+  Do NOT install or run the Vercel CLI. Do NOT accept any deploy token from this brief.
+
+# rationale: showcase — agent reads local file references via {{file:...}} and
+# builds against unpkg-hosted Three.js. The Vercel deploy is performed
+# OUT-OF-SESSION by the host post_session_hook below, so the token never
+# enters the agent transcript or sandbox (per NIST SP 800-204C build/deploy
+# separation, OWASP Secrets Management Cheat Sheet, and CVE-2026-44479).
+environment:
+  networking:
+    type: unrestricted
 
 vault:
   display_name: vercel
@@ -50,6 +60,8 @@ agents:
         mcp_server_name: vercel
         default_config:
           enabled: true
+          # rationale: showcase — Vercel MCP returns deploy URLs/IDs. Production
+          # posture should graduate to always_ask. Slice 45 follow-up.
           permission_policy: { type: always_allow }
 
 run:
@@ -58,6 +70,12 @@ run:
   stall_ms: 240000
   max_restarts: 1
   outcome:
-    description: "A deployed Three.js shape carousel at a Vercel URL with a fresh time-of-day title."
+    description: "A built Three.js shape carousel at /mnt/session/outputs/site/index.html with a fresh time-of-day title, manifest.json with ready_to_deploy:true."
     rubric_file: rubric.md
     max_iterations: 2
+  # Slice 10 §1.F2 — host-side deploy. Token via env (never CLI arg) per
+  # CVE-2026-44479. Authority: NIST SP 800-204C, OWASP Secrets Management.
+  post_session_hook:
+    command: bun run "$BRAID_FLOW_DIR/../../.claude/skills/braid/post-hooks/vercel-deploy.ts"
+    env_passthrough: [VERCEL_TOKEN]
+    timeout_ms: 300000

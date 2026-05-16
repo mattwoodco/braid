@@ -1,0 +1,76 @@
+name: CI
+
+# Slice 60 §3.S2 — gate every PR on type-check, tests, and schema validation.
+# Authority:
+#   - Project CLAUDE.md TDD RGR mandate
+#   - https://google.github.io/eng-practices/review/developer/small-cls.html
+#   - https://docs.github.com/en/code-security/security-advisories
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs when a new commit lands on the same PR/branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        # actions/checkout@v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Install bun
+        # oven-sh/setup-bun@v2.1.2 — pinned by SHA per NIST SP 800-204D
+        # software-supply-chain guidance (avoid mutable tag references).
+        # https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-204D.pdf
+        uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3
+        with:
+          # Pin the runtime so CI is reproducible alongside the lockfile.
+          bun-version: 1.3.14
+
+      - name: Install root deps (frozen lockfile)
+        run: bun install --frozen-lockfile
+
+      - name: Install skill deps (frozen lockfile)
+        working-directory: .claude/skills/braid
+        run: bun install --frozen-lockfile
+
+      - name: Type-check the skill
+        working-directory: .claude/skills/braid
+        run: bunx tsc --noEmit
+
+      - name: Run tests (includes schema parity + structural enforcers)
+        working-directory: .claude/skills/braid
+        run: bun test
+
+      - name: Docker build smoke (Slice 70)
+        # Verify the orchestrator image still builds. Authority: Slice 70
+        # ProactiveQuestion decision 72aed882. Pure build, no push.
+        run: docker build -t braid:ci-smoke .
+
+      - name: Coverage gate (Slice 45 — ≥80% line / ≥70% branch on lib.ts)
+        working-directory: .claude/skills/braid
+        # Bun's --coverage flag prints a report but doesn't fail on threshold by
+        # itself. Parse the output and fail if either floor is breached.
+        # Authority: docs/coverage-policy.md; Memento plan node ca9deec2.
+        run: |
+          set -euo pipefail
+          OUT=$(bun test --coverage 2>&1)
+          echo "$OUT"
+          LINE_PCT=$(echo "$OUT" | awk '/All files/{gsub("%","",$5); print $5; exit}')
+          FUNC_PCT=$(echo "$OUT" | awk '/All files/{gsub("%","",$3); print $3; exit}')
+          echo "Function coverage: $FUNC_PCT% (floor 80)"
+          echo "Line coverage: $LINE_PCT% (floor 70)"
+          awk -v f="$FUNC_PCT" 'BEGIN { if (f+0 < 80) { print "FAIL: function coverage below 80%"; exit 1 } }'
+          awk -v l="$LINE_PCT" 'BEGIN { if (l+0 < 70) { print "FAIL: line coverage below 70%"; exit 1 } }'

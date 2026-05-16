@@ -1,0 +1,63 @@
+# Slice 70 — docker-compose for the Braid orchestrator.
+#
+# Canonical invocation:
+#   docker compose run --rm braid list
+#   docker compose run --rm braid demo ad        # zero-cost, no keys needed
+#   docker compose run --rm braid setup <flow>
+#   docker compose run --rm braid run <flow>
+#
+# Trust boundary: the container. Mounts are MINIMAL by design — only what
+# the orchestrator actually needs. A malicious post-session hook inside
+# the container can read flows/ and outputs/, but NOT the host's home dir,
+# ~/.ssh, ~/.aws, or any other unmounted path. Authority: Slice 70
+# SecurityArchitecture decision 4474811d.
+
+services:
+  braid:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: braid:dev
+    # Set a stable name for `docker compose run --rm` to behave predictably.
+    container_name: braid-orchestrator
+    # rationale: the orchestrator process is non-interactive per invocation.
+    # Compose's --rm flag cleans up after each run.
+    init: true
+    # No inbound ports. SSE port is opt-in via compose.override.yml.
+    # Authority: SecurityArchitecture decision 4474811d.
+    # ports: []
+    # Read-only root filesystem so the agent's post-session hook can't write
+    # to arbitrary paths. Bind mounts below are writable as needed.
+    read_only: true
+    # Tmpfs for any /tmp work the orchestrator does at runtime.
+    tmpfs:
+      - /tmp:size=64m
+    # Capability drops per Slice 70 SecurityArchitecture decision 4474811d.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Mounts — minimal, named, intentional.
+    volumes:
+      # The repo provides the flows the orchestrator reads. rw so flow.yaml
+      # state files can be updated (gitignored).
+      - ./flows:/workspace/flows
+      # Outputs land here so deliverables persist across container runs.
+      - ./outputs:/workspace/outputs
+      # The skill code itself. rw because state.json and other per-skill
+      # ephemera live alongside.
+      - ./.claude/skills/braid:/workspace/.claude/skills/braid
+      # .env.local mounted READ-ONLY so the container can read secrets but
+      # cannot mutate the host's env file. If missing, compose creates it
+      # as an empty file (see compose.override.yml example for guidance).
+      - ./.env.local:/workspace/.env.local:ro
+    # No host network. Default bridge gives outbound only.
+    network_mode: bridge
+    environment:
+      # Bun reads .env.local from cwd automatically when the file exists.
+      # Container cwd is /workspace; the bind mount above places .env.local there.
+      BUN_INSTALL_CACHE_DIR: /tmp/bun-cache
+      # Operators wanting SSE port stability can set this via override.
+      BRAID_SSE_PORT: ${BRAID_SSE_PORT:-0}
+    # Working directory set in the Dockerfile; restated here for clarity.
+    working_dir: /workspace

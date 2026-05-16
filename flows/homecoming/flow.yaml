@@ -5,7 +5,14 @@ brief_default: |
 
   The page features THREE looping hero videos in sequence (a 3-shot emotional arc: ear-twitch at the door → tail-thunder mid-hallway → tackle-embrace on the porch) and a prominent "Support Veteran Service Dogs" button linking to https://example.com/donate.
 
-  Vercel access token: {{env:VERCEL_TOKEN}}
+# rationale: showcase — agent fetches Fal-generated media via curl from the
+# sandbox. The Vercel deploy is performed OUT-OF-SESSION by the host
+# post_session_hook below, so the token never enters the agent transcript or
+# sandbox (per NIST SP 800-204C build/deploy separation, OWASP Secrets
+# Management Cheat Sheet, and CVE-2026-44479).
+environment:
+  networking:
+    type: unrestricted
 
 vaults:
   - display_name: fal
@@ -28,6 +35,8 @@ agents:
         mcp_server_name: fal
         default_config:
           enabled: true
+          # rationale: showcase — Fal MCP returns URLs only. Production posture
+          # should graduate to always_ask. Slice 45 follow-up.
           permission_policy: { type: always_allow }
   - key: web_builder
     file: agents/web-builder.yaml
@@ -41,6 +50,12 @@ run:
   stall_ms: 240000
   max_restarts: 1
   outcome:
-    description: "Manifest at /mnt/session/outputs/manifest.json with 3 reachable video_urls and reachable page_url containing 3 video elements and a 'Support Veteran Service Dogs' button."
+    description: "Manifest at /mnt/session/outputs/manifest.json with 3 reachable video_urls, ready_to_deploy:true, and site_dir pointing at a folder containing index.html with 3 video elements and a 'Support Veteran Service Dogs' button."
     rubric_file: rubric.md
     max_iterations: 1
+  # Slice 10 §1.F2 — host-side deploy. Token via env (never CLI arg) per
+  # CVE-2026-44479. Authority: NIST SP 800-204C, OWASP Secrets Management.
+  post_session_hook:
+    command: bun run "$BRAID_FLOW_DIR/../../.claude/skills/braid/post-hooks/vercel-deploy.ts"
+    env_passthrough: [VERCEL_TOKEN]
+    timeout_ms: 300000

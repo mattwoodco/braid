@@ -3,8 +3,36 @@ import { Elysia } from "elysia";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "fs";
 import { dirname, resolve } from "path";
 import { parse, stringify } from "yaml";
+import { createMemoryStore, createMemory } from "./sdk-adapter";
 
-export const c = new Anthropic();
+/**
+ * Slice 40 — exported as mutable so tests can swap in a mock client.
+ * Slice 80 — also swapped at module load when `BRAID_DEMO_MODE=1`, so
+ * `bun run demo <flow>` runs the entire orchestrator against a deterministic
+ * fake without any real Anthropic API call. The real Anthropic client is
+ * never instantiated in demo mode — keys are ignored.
+ *
+ * Authority for the env-flag swap: Slice 80 design decision df5a6be9 and
+ * security decision af93996e (refuse real API calls in demo mode).
+ */
+export let c: Anthropic = createInitialClient();
+
+function createInitialClient(): Anthropic {
+  if (process.env.BRAID_DEMO_MODE === "1") {
+    // Dynamic require so the mock is only loaded when demo mode is active.
+    // Cannot use top-level await import here because this runs synchronously
+    // at module evaluation. Bun supports require() in ESM for this case.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { createMockAnthropic } = require("./mocks/anthropic") as typeof import("./mocks/anthropic");
+    return createMockAnthropic({ demoMode: true }).client as Anthropic;
+  }
+  return new Anthropic();
+}
+
+/** Replace the module-level Anthropic client. For tests and demo mode. */
+export function setAnthropicClient(client: Anthropic): void {
+  c = client;
+}
 const enc = new TextEncoder();
 export const REPO_ROOT = process.cwd();
 
@@ -35,6 +63,60 @@ export type MemoryStoreSpec = {
   dream_instructions?: string;
 };
 
+/**
+ * NetworkingSpec mirrors the Anthropic environments `networking` block.
+ * Authority: https://platform.claude.com/docs/en/managed-agents/environments
+ *   "For production deployments, use `limited` networking with an explicit
+ *    `allowed_hosts` list."
+ */
+export type NetworkingSpec =
+  | { type: "unrestricted" }
+  | {
+      type: "limited";
+      allowed_hosts: string[];
+      allow_mcp_servers?: boolean;
+      allow_package_managers?: boolean;
+    };
+
+export type EnvironmentSpec = {
+  networking?: NetworkingSpec;
+};
+
+/**
+ * PostSessionHookSpec — Slice 10 §1.F2.
+ *
+ * A shell command executed on the host AFTER the session ends. Designed to
+ * carry credentials that must never enter the agent's context (transcript,
+ * brief, sandbox).
+ *
+ * Authoritative pattern basis:
+ *   - NIST SP 800-204C "Implementation of DevSecOps for a Microservices-based
+ *     Application" — build, package, and deploy are separate pipeline stages
+ *     with separate credential scope.
+ *   - OWASP Secrets Management Cheat Sheet — CI/CD tooling holds credentials
+ *     it needs; sandboxed code does not.
+ *   - CVE-2026-44479 — never pass tokens as CLI args; use env vars.
+ *   - Anthropic vault docs — for in-session work, vault credentials are the
+ *     only documented secret channel.
+ *
+ * Contract:
+ *   - The hook executes on the host with a clean env. Only vars listed in
+ *     `env_passthrough` are forwarded. BRAID_* context vars are always added.
+ *   - The hook has `timeout_ms` to complete (default 5 minutes).
+ *   - Hook stdout/stderr is captured and surfaced via the SSE event stream.
+ *   - Non-zero exit code is reported but does not crash the orchestrator.
+ */
+export type PostSessionHookSpec = {
+  /** Shell command. Use $BRAID_SESSION_ID / $BRAID_FLOW_NAME / $BRAID_OUTPUT_DIR / $BRAID_FLOW_DIR plus any env_passthrough vars. */
+  command: string;
+  /** Working directory. Defaults to BRAID_OUTPUT_DIR. */
+  cwd?: string;
+  /** Host env vars to pass through. Anything not listed is stripped. */
+  env_passthrough?: string[];
+  /** Hard timeout. Default 5 minutes. */
+  timeout_ms?: number;
+};
+
 export type Manifest = {
   name: string;
   env_name: string;
@@ -46,19 +128,165 @@ export type Manifest = {
   memory_stores?: MemoryStoreSpec[];
   agents: AgentSpec[];
   sentinel_key?: string;
+  environment?: EnvironmentSpec;
   run?: {
     attach_vault?: boolean;
     attach_stores?: boolean;
     stall_ms?: number;
     max_restarts?: number;
     log_runs?: boolean;
+    /** Slice 20 §2.A7 — manifest-declared key from `memory_stores` used as
+     * sentinel context. If unset, sentinel falls back to `projectStore`. */
+    sentinel_context_store?: string;
     outcome?: {
       description: string;
       rubric_file?: string;
       max_iterations?: number;
     };
+    post_session_hook?: PostSessionHookSpec;
+    /** Slice 100 — automatic per-run reflection. When set, after the session
+     * reaches success terminus, the named agent reads the trajectory and
+     * writes pattern findings to target_store. */
+    reflection?: ReflectionConfig;
   };
 };
+
+/**
+ * Slice 100 — per-run reflection config.
+ *
+ * Authority: Slice 100 architectural decision 4dce6f31 (run.reflection block).
+ * Mirrors Hermes Agent's automatic post-task reflection cycle, adapted to
+ * Braid's flow.yaml + memory_stores primitives.
+ */
+export type ReflectionConfig = {
+  /** Key into manifest.agents — which agent runs the reflection pass. */
+  agent_key: string;
+  /** Key into manifest.memory_stores — where pattern findings get written. */
+  target_store: string;
+  /** Optional override of the reflection prompt. Default invokes the agent's
+   *  own system prompt (which should already be reflection-shaped). */
+  instructions?: string;
+};
+
+/**
+ * Slice 100 — pure decision: should reflection fire?
+ *
+ * Per architectural decision 4dce6f31: fire on successful session terminus
+ * (session_idle without requires_action) when configured. Do not fire on
+ * session_terminated (abnormal end, no useful trajectory) or watchdog
+ * give-up (run failed). Failed-run reflection is a v2 concern.
+ */
+export type ReflectionTrigger =
+  | "session_idle"
+  | "session_terminated"
+  | "watchdog_giveup";
+export function reflectionShouldFire(
+  trigger: ReflectionTrigger,
+  config: ReflectionConfig | undefined,
+): { fire: boolean; reason: string } {
+  if (!config) return { fire: false, reason: "reflection not configured" };
+  switch (trigger) {
+    case "session_idle":
+      return { fire: true, reason: "session ended successfully (idle)" };
+    case "session_terminated":
+      return { fire: false, reason: "session terminated abnormally; no useful trajectory" };
+    case "watchdog_giveup":
+      return { fire: false, reason: "watchdog gave up (stalled); reflection skipped" };
+  }
+}
+
+export type PostSessionHookContext = {
+  sessionId: string;
+  flowName: string;
+  flowDir: string;
+  outputDir: string;
+};
+
+export type PostSessionHookResult = {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+  /** Set when the hook never ran (e.g. missing env_passthrough var). */
+  error?: string;
+};
+
+/**
+ * Execute a post-session hook with a strict env scope.
+ *
+ * Per OWASP Secrets Management ("only authorize those secrets ... required for
+ * the CI/CD tooling to execute its job"), the hook receives ONLY:
+ *   - `BRAID_*` context vars
+ *   - vars listed in `env_passthrough`
+ *   - `PATH` (so the shell can find executables)
+ *
+ * Notably absent: every other process.env var — including credentials for
+ * other services. Least-privilege at the hook boundary.
+ */
+export async function runPostSessionHook(
+  spec: PostSessionHookSpec,
+  ctx: PostSessionHookContext,
+): Promise<PostSessionHookResult> {
+  const start = Date.now();
+  const cwd = spec.cwd ?? ctx.outputDir;
+  const timeout = spec.timeout_ms ?? 5 * 60 * 1000;
+
+  const passthrough = spec.env_passthrough ?? [];
+  const env: Record<string, string> = {
+    PATH: process.env.PATH ?? "/usr/bin:/bin",
+    BRAID_SESSION_ID: ctx.sessionId,
+    BRAID_FLOW_NAME: ctx.flowName,
+    BRAID_FLOW_DIR: ctx.flowDir,
+    BRAID_OUTPUT_DIR: ctx.outputDir,
+  };
+  for (const key of passthrough) {
+    const v = process.env[key];
+    if (v === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "",
+        durationMs: Date.now() - start,
+        error: `post_session_hook env_passthrough missing on host: ${key}`,
+      };
+    }
+    env[key] = v;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const proc = Bun.spawn(["sh", "-c", spec.command], {
+      cwd,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+      signal: controller.signal,
+    });
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    const exitCode = await proc.exited;
+    return {
+      exitCode,
+      stdout,
+      stderr,
+      durationMs: Date.now() - start,
+    };
+  } catch (err) {
+    return {
+      exitCode: 1,
+      stdout: "",
+      stderr: "",
+      durationMs: Date.now() - start,
+      error: `post_session_hook execution failed: ${(err as Error).message}`,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export type State = {
   env?: string;
@@ -70,14 +298,18 @@ export type State = {
   [k: string]: unknown;
 };
 
-export function loadManifest(path: string): Manifest {
+/**
+ * Slice 20 §2.A1 — pure loader. Returns the manifest AND the resolved flow
+ * directory. Callers thread `flowDir` to downstream functions explicitly.
+ * `process.cwd` is never mutated.
+ */
+export function loadManifest(path: string): { manifest: Manifest; flowDir: string } {
   const abs = resolve(REPO_ROOT, path);
   const raw = parse(readFileSync(abs, "utf-8")) as Partial<Manifest> & { name: string };
-  process.chdir(dirname(abs));
-  return applyDefaults(raw);
+  return { manifest: applyDefaults(raw), flowDir: dirname(abs) };
 }
 
-function applyDefaults(m: Partial<Manifest> & { name: string }): Manifest {
+export function applyDefaults(m: Partial<Manifest> & { name: string }): Manifest {
   if (!m.name) throw new Error("flow.yaml: `name` is required");
   const name = m.name;
   const out: Manifest = {
@@ -91,17 +323,58 @@ function applyDefaults(m: Partial<Manifest> & { name: string }): Manifest {
     memory_stores: m.memory_stores,
     agents: m.agents ?? [],
     sentinel_key: m.sentinel_key,
+    environment: defaultEnvironment(m.environment),
     run: m.run,
   };
 
   if (out.agents.length === 1 && !out.agents.some((a) => a.is_director)) {
-    out.agents[0].is_director = true;
+    const first = out.agents[0];
+    if (first) first.is_director = true;
   }
 
   out.run ??= {};
   out.run.attach_vault ??= true;
   out.run.attach_stores ??= true;
   return out;
+}
+
+/**
+ * Apply safe-by-default networking config per Anthropic environments guidance.
+ *
+ * Default: `limited` with empty `allowed_hosts` (strictest). Flows that need
+ * outbound egress MUST declare it explicitly. The default forces the author to
+ * acknowledge each external surface — exactly what the principle of least
+ * privilege requires.
+ *
+ * Authority:
+ *   https://platform.claude.com/docs/en/managed-agents/environments
+ *   "For production deployments, use `limited` networking with an explicit
+ *    `allowed_hosts` list. Follow the principle of least privilege..."
+ */
+function defaultEnvironment(env: EnvironmentSpec | undefined): EnvironmentSpec {
+  const networking = env?.networking;
+  if (!networking) {
+    return {
+      networking: {
+        type: "limited",
+        allowed_hosts: [],
+        allow_mcp_servers: false,
+        allow_package_managers: false,
+      },
+    };
+  }
+  if (networking.type === "limited") {
+    return {
+      ...env,
+      networking: {
+        type: "limited",
+        allowed_hosts: networking.allowed_hosts ?? [],
+        allow_mcp_servers: networking.allow_mcp_servers ?? false,
+        allow_package_managers: networking.allow_package_managers ?? false,
+      },
+    };
+  }
+  return { ...env, networking };
 }
 
 export function listFlows(): string[] {
@@ -122,13 +395,62 @@ export function saveState(file: string, state: State) {
   writeFileSync(file, JSON.stringify(state, null, 2));
 }
 
-export function expandBrief(brief: string): string {
+/**
+ * Expand a brief by substituting `{{file:relpath}}` and `{{env:NAME}}` markers.
+ *
+ * `{{file:...}}` paths are sandboxed to `flowDir`:
+ *   - absolute paths are rejected
+ *   - `..` and any path that resolves outside `flowDir` are rejected
+ * Authority: https://cwe.mitre.org/data/definitions/22.html (CWE-22), OWASP
+ * Path Traversal.
+ *
+ * Note: `{{env:...}}` interpolation of secrets into the brief is on the F2
+ * remediation list — secrets must flow through vault credentials, not the
+ * brief. This function keeps `{{env:...}}` for now so non-secret env values
+ * (e.g. a public URL) still resolve, but Slice 10 F2 will remove or gate it.
+ */
+export function expandBrief(brief: string, flowDir: string): string {
+  const flowRoot = resolve(flowDir);
   return brief
-    .replace(/\{\{file:([^}]+)\}\}/g, (_, p) => readFileSync(p.trim(), "utf-8"))
-    .replace(/\{\{env:([^}]+)\}\}/g, (_, name) => {
-      const v = process.env[name.trim()];
-      if (!v) throw new Error(`brief references missing env var: ${name.trim()}`);
-      return v;
+    .replace(/\{\{file:([^}]+)\}\}/g, (_, rawPath: string) => {
+      const requested = rawPath.trim();
+      if (requested.length === 0) {
+        throw new Error("brief: empty {{file:...}} path");
+      }
+      // Reject absolute paths (including the leading "/" form like //etc/passwd).
+      if (requested.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(requested)) {
+        throw new Error(
+          `brief: absolute paths are not allowed in {{file:...}} — got "${requested}"`,
+        );
+      }
+      const resolved = resolve(flowRoot, requested);
+      // Prefix check + path separator boundary so `/foo` doesn't match `/foobar`.
+      const rootWithSep = flowRoot.endsWith("/") ? flowRoot : flowRoot + "/";
+      if (resolved !== flowRoot && !resolved.startsWith(rootWithSep)) {
+        throw new Error(
+          `brief: {{file:${requested}}} resolves outside flow directory (${resolved} not under ${flowRoot})`,
+        );
+      }
+      return readFileSync(resolved, "utf-8");
+    })
+    .replace(/\{\{env:([^}]+)\}\}/g, (_, name: string) => {
+      // F2: brief-interpolated secrets are no longer accepted. Authority:
+      //   - NIST SP 800-204C: build/deploy separation; deploy credentials live
+      //     in the CI/CD tooling, not in agent inputs.
+      //   - OWASP Secrets Management Cheat Sheet: limit CI/CD credential scope.
+      //   - CVE-2026-44479 (Vercel CLI): never pass tokens as CLI args; use env.
+      //   - Anthropic vault docs + Pluto Security: any credential outside the
+      //     vault is exfiltratable from the sandbox.
+      // The replacement pattern is `run.post_session_hook` with an explicit
+      // `env_passthrough` allowlist. The hook runs on the host after the
+      // session completes — the secret never enters transcript or sandbox.
+      throw new Error(
+        `{{env:${name.trim()}}} is not allowed in briefs. ` +
+          `Move credential-bearing work to run.post_session_hook with ` +
+          `env_passthrough: ["${name.trim()}"]. ` +
+          `Authority: NIST SP 800-204C, OWASP Secrets Management Cheat Sheet, ` +
+          `CVE-2026-44479, https://platform.claude.com/docs/en/managed-agents/vaults`,
+      );
     });
 }
 
@@ -172,11 +494,131 @@ export function startSseServer(portArg?: number) {
   return { emit, stop: () => { done = true; setTimeout(() => app.stop(), 500); } };
 }
 
-export async function ensureResources(manifest: Manifest, state: State): Promise<State> {
+/**
+ * Default agent toolset injected when a flow's agent yaml declares no `tools:`.
+ * Slice 10 §1.F3.
+ *
+ * Defaults to `permission_policy: always_ask` — Pluto Security hardening
+ * guidance for Claude Managed Agents directs `always_ask` for bash/write
+ * access. The platform's own default is `always_allow`, which is the pattern
+ * behind OpenClaw CVE-2026-29607 / CVE-2026-28460.
+ *
+ * Flows that opt into `always_allow` must do so explicitly in their flow.yaml
+ * with a `# rationale:` comment.
+ */
+export const DEFAULT_AGENT_TOOLS: ReadonlyArray<{
+  type: string;
+  default_config: { enabled: boolean; permission_policy: { type: string } };
+}> = [
+  {
+    type: "agent_toolset_20260401",
+    default_config: {
+      enabled: true,
+      permission_policy: { type: "always_ask" },
+    },
+  },
+];
+
+/**
+ * MCP host allowlist. Slice 10 §1.F5.
+ *
+ * Anthropic's vault subsystem matches credentials by `mcp_server_url` at
+ * session runtime but does NOT enforce a host allowlist — that responsibility
+ * falls on the caller. A typo'd or compromised `flow.yaml` would otherwise
+ * ship a real token to an attacker-controlled URL. The default list contains
+ * the two MCP hosts the shipped flows use; extend via
+ * `BRAID_MCP_ALLOWLIST=host1,host2,...`.
+ *
+ * Authority: https://platform.claude.com/docs/en/managed-agents/vaults
+ */
+const DEFAULT_MCP_ALLOWLIST: ReadonlySet<string> = new Set([
+  "mcp.fal.ai",
+  "mcp.vercel.com",
+]);
+
+export function validateMcpHost(rawUrl: string): void {
+  // Bun-types vs node-types disagree on `URL`; bind to the constructor's
+  // own instance type so the local binding matches what `new URL(...)`
+  // actually returns at runtime.
+  let parsed: InstanceType<typeof URL>;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error(`MCP URL is not a valid URL: "${rawUrl}"`);
+  }
+  if (parsed.protocol !== "https:") {
+    throw new Error(
+      `MCP URL must use https — got "${parsed.protocol}" in "${rawUrl}"`,
+    );
+  }
+  if (parsed.username !== "" || parsed.password !== "") {
+    throw new Error(
+      `MCP URL must not contain userinfo (embedded credentials): "${rawUrl}"`,
+    );
+  }
+  const override = process.env.BRAID_MCP_ALLOWLIST;
+  const allow: ReadonlySet<string> = override
+    ? new Set(
+        override
+          .split(",")
+          .map((h) => h.trim().toLowerCase())
+          .filter(Boolean),
+      )
+    : DEFAULT_MCP_ALLOWLIST;
+  if (!allow.has(parsed.hostname.toLowerCase())) {
+    throw new Error(
+      `MCP host "${parsed.hostname}" is not on the allowlist. Either add it to BRAID_MCP_ALLOWLIST or use one of: ${[...allow].join(", ")}`,
+    );
+  }
+}
+
+/**
+ * Slice 10 §1.F7 — gate the destructive state-file wipe in `purge`.
+ *
+ * Pure function so it's testable without launching purge.ts. Returns a
+ * decision and a human-readable reason. The caller is responsible for
+ * acting on the decision (write or refuse).
+ */
+export function shouldWipeStateFiles(argv: readonly string[]): {
+  wipe: boolean;
+  reason: string;
+} {
+  const flags = new Set(argv);
+  const interactive = flags.has("--select") || flags.has("-s");
+  if (interactive) {
+    return { wipe: false, reason: "interactive mode — state files left intact" };
+  }
+  const confirmed = flags.has("--yes") || flags.has("-y");
+  if (!confirmed) {
+    return {
+      wipe: false,
+      reason:
+        "non-interactive purge refused: pass --yes to confirm wiping state files, or --select to choose interactively",
+    };
+  }
+  return { wipe: true, reason: "non-interactive + --yes confirmed" };
+}
+
+export async function ensureResources(
+  manifest: Manifest,
+  state: State,
+  flowDir: string,
+): Promise<State> {
+  const fileFromFlow = (p: string) => resolve(flowDir, p);
   if (!state.env) {
+    // Networking is sourced from the manifest (applyDefaults guarantees safe
+    // defaults: `limited` with empty allowed_hosts). To opt into the broader
+    // surface, a flow must declare `environment.networking` explicitly.
+    // Authority: https://platform.claude.com/docs/en/managed-agents/environments
+    const networking = manifest.environment?.networking ?? {
+      type: "limited" as const,
+      allowed_hosts: [],
+      allow_mcp_servers: false,
+      allow_package_managers: false,
+    };
     const env = await c.beta.environments.create({
       name: manifest.env_name,
-      config: { type: "cloud", networking: { type: "unrestricted" } },
+      config: { type: "cloud", networking } as Parameters<typeof c.beta.environments.create>[0]["config"],
     });
     state.env = env.id;
     console.log(`  env: ${env.id}`);
@@ -190,7 +632,9 @@ export async function ensureResources(manifest: Manifest, state: State): Promise
   if (state.vault && !state.vaults.includes(state.vault)) state.vaults.unshift(state.vault);
   const existingCount = state.vaults.length;
   for (let i = existingCount; i < vaultSpecs.length; i++) {
-    const v = vaultSpecs[i];
+    const v = vaultSpecs[i]!;
+    // F5: validate MCP host before issuing a token against it.
+    validateMcpHost(v.credential.mcp_server_url);
     const token = process.env[v.credential.token_env];
     if (!token) throw new Error(`Missing env var: ${v.credential.token_env}`);
     const vault = await c.beta.vaults.create({ display_name: v.display_name });
@@ -210,18 +654,14 @@ export async function ensureResources(manifest: Manifest, state: State): Promise
   state.stores ??= {};
   for (const s of manifest.memory_stores ?? []) {
     if (state.stores[s.key]) continue;
-    const store = await (c.beta as unknown as {
-      memoryStores: { create: (args: { name: string }) => Promise<{ id: string }> };
-    }).memoryStores.create({ name: s.name });
+    const store = await createMemoryStore(c, s.name);
     state.stores[s.key] = store.id;
     console.log(`  store ${s.key}: ${store.id}`);
-    if (s.seed) await seedStore(manifest, state, s, store.id);
+    if (s.seed) await seedStore(manifest, state, s, store.id, flowDir);
   }
 
   if (manifest.run?.log_runs && !state.stores.runLog) {
-    const store = await (c.beta as unknown as {
-      memoryStores: { create: (args: { name: string }) => Promise<{ id: string }> };
-    }).memoryStores.create({ name: `${manifest.name}-runs` });
+    const store = await createMemoryStore(c, `${manifest.name}-runs`);
     state.stores.runLog = store.id;
     console.log(`  store runLog: ${store.id}`);
   }
@@ -229,11 +669,11 @@ export async function ensureResources(manifest: Manifest, state: State): Promise
   state.agents ??= {};
   for (const a of manifest.agents) {
     if (state.agents[a.key]) continue;
-    const base = parse(readFileSync(a.file, "utf-8")) as Record<string, unknown>;
+    const base = parse(readFileSync(fileFromFlow(a.file), "utf-8")) as Record<string, unknown>;
     const def: Record<string, unknown> = { ...base };
     if (a.mcp_servers) def.mcp_servers = a.mcp_servers;
     if (a.tools) def.tools = a.tools;
-    if (!def.tools) def.tools = [{ type: "agent_toolset_20260401", default_config: { enabled: true } }];
+    if (!def.tools) def.tools = [...DEFAULT_AGENT_TOOLS];
     if (a.coordinator) {
       def.multiagent = {
         type: "coordinator",
@@ -249,11 +689,20 @@ export async function ensureResources(manifest: Manifest, state: State): Promise
     console.log(`  agent ${a.key}: ${agent.id}`);
   }
 
-  mkdirSync(manifest.output_dir, { recursive: true });
+  // Slice 20 §2.A1 follow-up — resolve output_dir against flowDir, not cwd.
+  // The Slice 70 container surfaces this: cwd is /workspace (read-only root)
+  // while flowDir/<output_dir> lands inside the mounted flows volume (rw).
+  mkdirSync(resolve(flowDir, manifest.output_dir), { recursive: true });
   return state;
 }
 
-async function seedStore(manifest: Manifest, state: State, spec: MemoryStoreSpec, storeId: string) {
+async function seedStore(
+  manifest: Manifest,
+  state: State,
+  spec: MemoryStoreSpec,
+  storeId: string,
+  flowDir: string,
+) {
   if (!spec.seed) return;
   const seeder = await c.beta.agents.create({
     name: `${manifest.name}-seeder`,
@@ -274,7 +723,7 @@ async function seedStore(manifest: Manifest, state: State, spec: MemoryStoreSpec
   } as Parameters<typeof c.beta.sessions.create>[0]);
 
   const blocks = spec.seed.files.map((f) =>
-    `=== ${spec.seed!.mount}/${f.split("/").pop()} ===\n${readFileSync(f, "utf-8")}`,
+    `=== ${spec.seed!.mount}/${f.split("/").pop()} ===\n${readFileSync(resolve(flowDir, f), "utf-8")}`,
   ).join("\n\n");
 
   const stream = await c.beta.sessions.events.stream(session.id);
@@ -300,11 +749,50 @@ const PULL_STRIP = new Set([
   "object",
 ]);
 
+/**
+ * Slice 20 §2.A8 — non-destructive write for `pull`.
+ *
+ * - `dryRun: true` returns the would-be content without writing.
+ * - Normal write makes a `.bak` of the existing file before overwriting so
+ *   the operator can recover if the remote drift was unintended.
+ * - No-op when the content is byte-identical (no spurious backup).
+ */
+export type WriteAgentSpecResult = {
+  wrote: boolean;
+  reason?: string;
+  backup?: string;
+  would_write?: string;
+};
+
+export function writeAgentSpec(
+  filePath: string,
+  content: string,
+  opts: { dryRun?: boolean } = {},
+): WriteAgentSpecResult {
+  if (opts.dryRun) {
+    return { wrote: false, would_write: content };
+  }
+  if (existsSync(filePath)) {
+    const current = readFileSync(filePath, "utf-8");
+    if (current === content) {
+      return { wrote: false, reason: "content identical — unchanged" };
+    }
+    const backup = `${filePath}.bak`;
+    writeFileSync(backup, current);
+    writeFileSync(filePath, content);
+    return { wrote: true, backup };
+  }
+  writeFileSync(filePath, content);
+  return { wrote: true };
+}
+
 export async function pullAgents(
   manifest: Manifest,
   state: State,
+  flowDir: string,
   keys?: string[],
-): Promise<{ key: string; file: string; version: number }[]> {
+  opts: { dryRun?: boolean } = {},
+): Promise<{ key: string; file: string; version: number; wrote: boolean; backup?: string }[]> {
   if (!state.agents) throw new Error("no agents in state — run setup first");
   const targets = manifest.agents.filter((a) =>
     keys && keys.length > 0 ? keys.includes(a.key) : true,
@@ -314,26 +802,160 @@ export async function pullAgents(
     if (unknown.length) throw new Error(`unknown agent key(s): ${unknown.join(", ")}`);
   }
 
-  const results: { key: string; file: string; version: number }[] = [];
+  const results: { key: string; file: string; version: number; wrote: boolean; backup?: string }[] = [];
   for (const a of targets) {
     const id = state.agents[a.key];
     if (!id) {
       console.log(`  skip ${a.key}: no id in state`);
       continue;
     }
-    const remote = (await c.beta.agents.retrieve(id)) as Record<string, unknown>;
+    const remote = (await c.beta.agents.retrieve(id)) as unknown as Record<string, unknown>;
     const spec: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(remote)) {
       if (PULL_STRIP.has(k)) continue;
       if (v === null || v === undefined) continue;
       spec[k] = v;
     }
-    writeFileSync(a.file, stringify(spec, { lineWidth: 0 }));
+    const filePath = resolve(flowDir, a.file);
+    const content = stringify(spec, { lineWidth: 0 });
+    const write = writeAgentSpec(filePath, content, opts);
     const version = (remote.version as number) ?? 0;
-    results.push({ key: a.key, file: a.file, version });
-    console.log(`  ✓ ${a.key} -> ${a.file}  (v${version})`);
+    results.push({
+      key: a.key,
+      file: a.file,
+      version,
+      wrote: write.wrote,
+      ...(write.backup ? { backup: write.backup } : {}),
+    });
+    if (opts.dryRun) {
+      console.log(`  [dry-run] ${a.key} -> ${a.file}  (v${version}) — would write ${content.length} bytes`);
+    } else if (write.wrote) {
+      const bak = write.backup ? ` (backup: ${a.file}.bak)` : "";
+      console.log(`  ✓ ${a.key} -> ${a.file}  (v${version})${bak}`);
+    } else {
+      console.log(`  · ${a.key} -> ${a.file}  (v${version}) ${write.reason ?? "no change"}`);
+    }
   }
   return results;
+}
+
+/**
+ * Slice 50 — pure exponential backoff sequence.
+ *
+ * Returns `attempts` delays, doubling each time, capped at `capMs`. Used by
+ * the reconnect loop in braid.ts so a flaky stream doesn't get hammered nor
+ * silently abandoned after one retry.
+ */
+export function backoffDelays(attempts: number, baseMs: number, capMs: number): number[] {
+  if (attempts < 0) throw new Error("backoffDelays: attempts must be non-negative");
+  const out: number[] = [];
+  let d = baseMs;
+  for (let i = 0; i < attempts; i++) {
+    out.push(Math.min(d, capMs));
+    d *= 2;
+  }
+  return out;
+}
+
+/**
+ * Slice 50 — structured JSON-line logger.
+ *
+ * One line per call: `{"ts":"…","level":"info|warn|error","event":"…","payload":…}`.
+ * Lines are terminated with `\n` so log streams stay line-delimited.
+ *
+ * The caller supplies a writer so tests can capture without touching
+ * `process.stdout`. In production, the writer is typically a wrapper around
+ * `process.stdout.write`.
+ */
+export type LogLevel = "info" | "warn" | "error";
+export type Logger = {
+  info: (event: string, payload?: unknown) => void;
+  warn: (event: string, payload?: unknown) => void;
+  error: (event: string, payload?: unknown) => void;
+};
+export function createLogger(writer: (line: string) => void): Logger {
+  const emit = (level: LogLevel, event: string, payload?: unknown) => {
+    const entry: { ts: string; level: LogLevel; event: string; payload?: unknown } = {
+      ts: new Date().toISOString(),
+      level,
+      event,
+    };
+    if (payload !== undefined) entry.payload = payload;
+    writer(JSON.stringify(entry) + "\n");
+  };
+  return {
+    info: (event, payload) => emit("info", event, payload),
+    warn: (event, payload) => emit("warn", event, payload),
+    error: (event, payload) => emit("error", event, payload),
+  };
+}
+
+/**
+ * Slice 20 §2.A5 — pure truncation. Returns the new kept list (newest first)
+ * AND the dropped ids so the caller can clean them up at the remote side.
+ */
+export function truncateSessionHistory(
+  newId: string,
+  prior: readonly string[],
+  maxKeep: number,
+): { kept: string[]; dropped: string[] } {
+  const merged = [newId, ...prior.filter((id) => id !== newId)];
+  return {
+    kept: merged.slice(0, maxKeep),
+    dropped: merged.slice(maxKeep),
+  };
+}
+
+/**
+ * Slice 20 §2.A7 — resolve the sentinel's context-store id.
+ *
+ * Precedence:
+ *   1. `manifest.run.sentinel_context_store` (explicit, manifest-declared).
+ *      If the manifest names a key that isn't in state, return undefined
+ *      (do NOT fall back) so a misconfigured flow surfaces as missing-context
+ *      rather than silently attaching the wrong store.
+ *   2. `state.stores.projectStore` (backwards compat with the `ad` flow).
+ *   3. undefined — sentinel runs without context.
+ */
+export function sentinelStoreId(
+  manifest: Manifest,
+  state: State,
+): string | undefined {
+  const declared = manifest.run?.sentinel_context_store;
+  if (declared !== undefined) {
+    return state.stores?.[declared];
+  }
+  return state.stores?.projectStore;
+}
+
+/**
+ * Slice 20 §2.A3 — watchdog decision logic, extracted as a pure function so
+ * the callback's behavior is testable without setInterval orchestration.
+ *
+ * The integration in braid.ts adds a `cancelled` closure flag that the async
+ * callback checks at each await boundary; passing `cancelled: true` short-
+ * circuits the decision to `none`. This closes the cancel-race window where
+ * `clearInterval` doesn't cancel an already-in-flight async callback.
+ */
+export type WatchdogAction = "none" | "fire_sentinel" | "restart" | "give_up";
+export function watchdogDecide(input: {
+  cancelled: boolean;
+  sentinelFired: boolean;
+  silenceMs: number;
+  stallMs: number;
+  restartCount: number;
+  maxRestarts: number;
+}): { action: WatchdogAction; silenceSec: number } {
+  const silenceSec = Math.round(input.silenceMs / 1000);
+  if (input.cancelled) return { action: "none", silenceSec };
+  if (input.silenceMs < input.stallMs) return { action: "none", silenceSec };
+  if (!input.sentinelFired) return { action: "fire_sentinel", silenceSec };
+  if (input.silenceMs > input.stallMs * 2) {
+    return input.restartCount < input.maxRestarts
+      ? { action: "restart", silenceSec }
+      : { action: "give_up", silenceSec };
+  }
+  return { action: "none", silenceSec };
 }
 
 export function directorOf(manifest: Manifest): AgentSpec {
@@ -362,7 +984,14 @@ export async function createOrResumeSession(
     try {
       const existing = await c.beta.sessions.retrieve(resumeId) as { id: string; status: string };
       if (existing.status === "running") return { session: existing, resumed: true };
-    } catch {}
+    } catch (err) {
+      // Slice 20 §2.A2 — log the failure so the user sees WHY resume fell
+      // back to creating a new session. Common causes: session deleted,
+      // 404 from Anthropic, network error.
+      console.log(
+        `[resume] could not resume ${resumeId} (${(err as Error).message}); creating new session`,
+      );
+    }
   }
   const director = directorOf(manifest);
   const directorId = state.agents?.[director.key];
@@ -377,17 +1006,49 @@ export async function createOrResumeSession(
       ? { resources: buildResources(manifest, state) }
       : {}),
   } as Parameters<typeof c.beta.sessions.create>[0]);
-  state.sessions = [session.id, ...(state.sessions ?? []).filter((id) => id !== session.id)].slice(0, 20);
+  // Slice 20 §2.A5 — truncate locally AND clean up dropped sessions
+  // remotely so they don't orphan-accrue cost.
+  const { kept, dropped } = truncateSessionHistory(session.id, state.sessions ?? [], 20);
+  state.sessions = kept;
+  for (const droppedId of dropped) {
+    // Fire-and-forget; we don't block session creation on cleanup. Errors
+    // are logged so failures (already-deleted, network) are diagnosable.
+    c.beta.sessions.delete(droppedId).catch((err: unknown) => {
+      console.log(`[truncate] failed to delete dropped session ${droppedId}: ${(err as Error).message}`);
+    });
+  }
   return { session, resumed: false };
 }
 
-export function buildInitialEvents(manifest: Manifest, brief: string) {
+/**
+ * Slice 20 §2.A6 — interrupt + delete the predecessor session when the
+ * orchestrator restarts. Without this, the abandoned session times out
+ * eventually but remains chargeable until then.
+ *
+ * Fire-and-forget; the restart proceeds regardless of cleanup success.
+ */
+export async function cleanupAbandonedSession(sessionId: string): Promise<void> {
+  try {
+    await c.beta.sessions.events.send(sessionId, {
+      events: [{ type: "user.interrupt" }] as Parameters<typeof c.beta.sessions.events.send>[1]["events"],
+    });
+  } catch (err) {
+    console.log(`[cleanup] interrupt failed for ${sessionId}: ${(err as Error).message}`);
+  }
+  try {
+    await c.beta.sessions.delete(sessionId);
+  } catch (err) {
+    console.log(`[cleanup] delete failed for ${sessionId}: ${(err as Error).message}`);
+  }
+}
+
+export function buildInitialEvents(manifest: Manifest, brief: string, flowDir: string) {
   const events: unknown[] = [
     { type: "user.message", content: [{ type: "text", text: brief }] },
   ];
   if (manifest.run?.outcome) {
     const o = manifest.run.outcome;
-    const rubric = o.rubric_file ? readFileSync(o.rubric_file, "utf-8") : o.description;
+    const rubric = o.rubric_file ? readFileSync(resolve(flowDir, o.rubric_file), "utf-8") : o.description;
     events.push({
       type: "user.define_outcome",
       description: o.description,
@@ -407,7 +1068,9 @@ export async function downloadSessionFiles(sessionId: string, outDir: string, em
     } as Parameters<typeof c.beta.files.list>[0]);
     for (const f of files.data) {
       const fname = (f as { filename?: string }).filename ?? f.id;
-      const buf = Buffer.from(await (await c.beta.files.download(f.id)).arrayBuffer());
+      // Use Uint8Array directly so Bun's stricter writeFileSync types accept
+      // the buffer without a Node-vs-Bun ArrayBufferView mismatch.
+      const buf = new Uint8Array(await (await c.beta.files.download(f.id)).arrayBuffer());
       writeFileSync(`${outDir}/${fname}`, buf);
       emit("saved", `${outDir}/${fname}`);
       saved.push(fname);
@@ -447,13 +1110,138 @@ ${savedFiles.length ? savedFiles.map((f) => `- ${f}`).join("\n") : "(none)"}
 ${agentReport.slice(0, 8000)}
 `;
   try {
-    await (c.beta as unknown as {
-      memoryStores: { memories: { create: (storeId: string, args: { path: string; content: string }) => Promise<{ id: string }> } };
-    }).memoryStores.memories.create(storeId, { path, content });
+    await createMemory(c, storeId, { path, content });
     return path;
   } catch (err) {
     console.error(`[runLog] write failed: ${(err as Error).message}`);
     return null;
+  }
+}
+
+/**
+ * Slice 100 — per-run reflection orchestrator.
+ *
+ * Runs after a successful session terminus. Spawns a brief Anthropic session
+ * against the reflector agent with read_write access to the target_store,
+ * sends the trajectory + outcome (NEVER the saved-file contents per security
+ * decision 50381fee — patterns only), captures the reflector's pattern
+ * output, and persists it to the target_store via memoryStores.memories.create.
+ *
+ * Returns { ok, storedPath?, error?, durationMs } so the caller can emit
+ * structured events without trying to throw.
+ *
+ * Authority:
+ *   - Slice 100 architectural decision 4dce6f31
+ *   - Slice 100 security decision 50381fee (patterns only)
+ *   - Hermes Agent reflection cycle (https://hermes-agent.nousresearch.com)
+ */
+export type RunReflectionResult = {
+  ok: boolean;
+  storedPath?: string;
+  patternText?: string;
+  error?: string;
+  durationMs: number;
+};
+
+export async function runReflection(
+  manifest: Manifest,
+  state: State,
+  sessionId: string,
+  agentReport: string,
+  outcome: { result?: unknown; note?: string } | null,
+  savedFiles: string[] = [],
+): Promise<RunReflectionResult> {
+  const start = Date.now();
+  const cfg = manifest.run?.reflection;
+  if (!cfg) {
+    return { ok: false, error: "reflection not configured", durationMs: 0 };
+  }
+  const agentId = state.agents?.[cfg.agent_key];
+  if (!agentId) {
+    return {
+      ok: false,
+      error: `reflection agent '${cfg.agent_key}' not provisioned in state`,
+      durationMs: Date.now() - start,
+    };
+  }
+  const storeId = state.stores?.[cfg.target_store];
+  if (!storeId) {
+    return {
+      ok: false,
+      error: `reflection target_store '${cfg.target_store}' not provisioned in state`,
+      durationMs: Date.now() - start,
+    };
+  }
+
+  try {
+    const sess = await c.beta.sessions.create({
+      agent: agentId,
+      environment_id: state.env!,
+      resources: [
+        {
+          type: "memory_store",
+          memory_store_id: storeId,
+          access: "read_write",
+          instructions: cfg.instructions ?? "Write reusable patterns from this run as a short markdown note. Do NOT quote file contents or the brief verbatim — summarize only.",
+        },
+      ],
+    } as Parameters<typeof c.beta.sessions.create>[0]);
+
+    // Security decision 50381fee: send agentReport + outcome + file LIST
+    // (filenames only). Truncate agentReport to keep token budget bounded.
+    const trajectory = [
+      `Session: ${sessionId}`,
+      `Outcome: ${JSON.stringify(outcome ?? { result: "unknown" })}`,
+      `Saved deliverables (filenames only, contents not included): ${savedFiles.length ? savedFiles.join(", ") : "(none)"}`,
+      "",
+      "Agent report (truncated):",
+      agentReport.slice(0, 6000),
+    ].join("\n");
+
+    const stream = await c.beta.sessions.events.stream(sess.id);
+    await c.beta.sessions.events.send(sess.id, {
+      events: [
+        {
+          type: "user.message",
+          content: [{ type: "text", text: trajectory }],
+        },
+      ] as Parameters<typeof c.beta.sessions.events.send>[1]["events"],
+    });
+
+    let patternText = "";
+    for await (const e of stream) {
+      if (e.type === "agent.message") {
+        patternText += (e as { content: Array<{ type: string; text?: string }> }).content
+          .filter((b) => b.type === "text")
+          .map((b) => b.text ?? "")
+          .join("");
+      }
+      if (e.type === "session.status_idle" || e.type === "session.status_terminated") break;
+    }
+
+    if (!patternText.trim()) {
+      return {
+        ok: false,
+        error: "reflection produced no pattern text",
+        durationMs: Date.now() - start,
+      };
+    }
+
+    const path = `reflections/${new Date().toISOString().slice(0, 10)}-${sessionId.slice(-8)}.md`;
+    await createMemory(c, storeId, { path, content: patternText });
+
+    return {
+      ok: true,
+      storedPath: path,
+      patternText,
+      durationMs: Date.now() - start,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: `reflection failed: ${(err as Error).message}`,
+      durationMs: Date.now() - start,
+    };
   }
 }
 
@@ -468,15 +1256,17 @@ export async function runSentinel(
   const sentinelId = manifest.sentinel_key ? state.agents?.[manifest.sentinel_key] : undefined;
   if (!sentinelId) return null;
   try {
-    const projectStoreId = state.stores?.projectStore;
+    // Slice 20 §2.A7 — context store is manifest-declared (falls back to
+    // `projectStore` for backwards-compat with the `ad` flow).
+    const contextStoreId = sentinelStoreId(manifest, state);
     const sess = await c.beta.sessions.create({
       agent: sentinelId,
       environment_id: state.env!,
-      ...(projectStoreId
+      ...(contextStoreId
         ? {
             resources: [{
               type: "memory_store",
-              memory_store_id: projectStoreId,
+              memory_store_id: contextStoreId,
               access: "read_only",
               instructions: "Director's project state. Read decisions.md to assess progress.",
             }],

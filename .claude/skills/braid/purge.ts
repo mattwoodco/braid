@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { writeFileSync, readFileSync, existsSync } from "fs";
 import { createInterface } from "readline/promises";
 import { stdin, stdout } from "process";
+import { shouldWipeStateFiles } from "./lib";
 
 const c = new Anthropic({ timeout: 15000, maxRetries: 0 });
 
@@ -184,9 +185,11 @@ await deleteInBatches("stores", selectedStores.map((s) => s.id), (id) =>
 
 rl?.close();
 
-if (!interactive) {
+// Slice 10 §1.F7 — wipe is gated on explicit confirmation.
+const gate = shouldWipeStateFiles(process.argv.slice(2));
+if (gate.wipe) {
   for (const f of flowDirs) writeFileSync(f, "{}");
   console.log(`\n✓ Reset ${flowDirs.length} state file(s). Run: bun scripts/braid.ts setup <flow>`);
 } else {
-  console.log("\n✓ Done (interactive mode — state files left intact).");
+  console.log(`\n✓ Done. ${gate.reason}`);
 }

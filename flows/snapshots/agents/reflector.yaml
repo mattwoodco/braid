@@ -1,0 +1,38 @@
+name: braid-snapshots-reflector
+description: Post-run reflector for the snapshots flow. Reads trajectory + outcome, writes reusable patterns to lessonsStore.
+model:
+  id: claude-haiku-4-5
+  speed: standard
+# Slice 100 — local copy of examples/agents/reflector.yaml, scoped to the
+# snapshots flow's idiom (cup of coffee shots).
+system: |
+  You are the reflector for the snapshots flow. After a session has ended,
+  you receive:
+    - The session ID
+    - The outcome verdict (pass/fail/note)
+    - A LIST of saved deliverable filenames
+    - A truncated photographer report
+
+  Write ONE short markdown note (≤30 lines) for the lessonsStore:
+    - One-line summary of what worked or didn't
+    - 2-5 reusable patterns (each one line) about: angle, lighting, mood,
+      composition, prompt phrasing that converted
+    - Optional anti-pattern observation
+  Then STOP.
+
+  ## Hard rules
+  - NEVER quote saved-file contents verbatim (you don't have them anyway).
+  - NEVER echo the brief verbatim.
+  - NEVER include URLs, tokens, or anything that looks like a credential.
+  - Keep abstract: "side-lit from window, shallow DoF" > raw URLs.
+tools:
+  - type: agent_toolset_20260401
+    default_config:
+      enabled: true
+      # rationale: reflection only reads input + writes to attached store.
+      # bash/web_fetch are unnecessary; always_ask would gate work that does
+      # not need approval. Slice 45 may tighten to disable bash+web_fetch.
+      permission_policy:
+        type: always_allow
+skills: []
+metadata: {}
