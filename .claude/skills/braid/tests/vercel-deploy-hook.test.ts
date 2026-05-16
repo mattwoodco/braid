@@ -13,6 +13,7 @@ import {
   extractVercelUrl,
   updateManifestWithDeploy,
   shouldDeploy,
+  validateSiteLayout,
 } from "../post-hooks/vercel-deploy";
 
 describe("parseDeployManifest", () => {
@@ -92,5 +93,42 @@ describe("shouldDeploy", () => {
 
   test("does not deploy for truthy non-boolean values (strict)", () => {
     expect(shouldDeploy({ ready_to_deploy: "true" as unknown as boolean }).deploy).toBe(false);
+  });
+});
+
+describe("validateSiteLayout", () => {
+  const out = "/out";
+  const exists = (paths: string[]) => (p: string) => paths.includes(p);
+
+  test("ok when site_dir and index.html both exist", () => {
+    const result = validateSiteLayout(
+      out,
+      { site_dir: "site" },
+      exists(["/out/site", "/out/site/index.html"]),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  test("rejects when declared site_dir does not exist (agent dropped index.html flat)", () => {
+    const result = validateSiteLayout(
+      out,
+      { site_dir: "site" },
+      exists(["/out/index.html"]),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("site_dir");
+  });
+
+  test("rejects when site_dir exists but contains no index.html", () => {
+    const result = validateSiteLayout(out, { site_dir: "site" }, exists(["/out/site"]));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("index.html");
+  });
+
+  test("falls back to outputDir when site_dir is absent and checks index.html there", () => {
+    const ok = validateSiteLayout(out, {}, exists(["/out", "/out/index.html"]));
+    expect(ok.ok).toBe(true);
+    const missing = validateSiteLayout(out, {}, exists(["/out"]));
+    expect(missing.ok).toBe(false);
   });
 });

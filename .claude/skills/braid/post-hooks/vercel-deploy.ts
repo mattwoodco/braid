@@ -99,6 +99,38 @@ export function shouldDeploy(m: DeployManifest): { deploy: boolean; reason: stri
 }
 
 /**
+ * Verify the manifest's declared `site_dir` actually contains the artifact
+ * the deploy will publish (an `index.html`). Agents that report
+ * `ready_to_deploy: true` but produce a broken layout (e.g. `index.html`
+ * dropped at the output root instead of inside `site_dir`) are caught here
+ * BEFORE invoking the Vercel CLI — the CLI's own error ("Could not find …")
+ * is opaque and surfaces the path mismatch only on careful reading.
+ *
+ * Exported for unit-testing.
+ */
+export function validateSiteLayout(
+  outputDir: string,
+  m: DeployManifest,
+  exists: (p: string) => boolean = existsSync,
+): { ok: true } | { ok: false; reason: string } {
+  const siteDir = m.site_dir ? resolve(outputDir, m.site_dir) : outputDir;
+  if (!exists(siteDir)) {
+    return {
+      ok: false,
+      reason: `manifest.site_dir resolves to ${siteDir} which does not exist. The agent likely wrote index.html at the output root instead of inside site_dir. Fix the agent's system prompt to write to /mnt/session/outputs/<site_dir>/index.html.`,
+    };
+  }
+  const indexPath = join(siteDir, "index.html");
+  if (!exists(indexPath)) {
+    return {
+      ok: false,
+      reason: `no index.html at ${indexPath}. Either the agent placed it elsewhere or the manifest's site_dir is wrong.`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
  * Main entry point. Only invoked when this file is run directly, not when
  * imported by tests.
  */
@@ -128,6 +160,12 @@ async function main(): Promise<void> {
   if (!gate.deploy) {
     console.log(`skipping deploy: ${gate.reason}`);
     return;
+  }
+
+  const layout = validateSiteLayout(outputDir, m);
+  if (!layout.ok) {
+    console.error(`site layout invalid: ${layout.reason}`);
+    process.exit(4);
   }
 
   const siteDir = m.site_dir ? resolve(outputDir, m.site_dir) : outputDir;
