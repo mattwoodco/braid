@@ -1,0 +1,45 @@
+# Slice 70 — keep the build context small and prevent accidental secret
+# leakage into image layers. Authority: SecurityArchitecture decision 4474811d.
+
+# Secrets — must never enter the image
+.env
+.env.*
+*.pem
+*.key
+id_rsa*
+
+# Local state and outputs (per-flow runtime artifacts; not deterministic)
+flows/*/state.json
+flows/*/outputs/
+outputs/
+.claude/skills/braid/state.json
+
+# Node / Bun caches
+node_modules/
+.claude/skills/braid/node_modules/
+
+# Git history (not needed in image)
+.git/
+.gitignore
+
+# Editor / OS noise
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Build / test artifacts
+coverage/
+*.bak
+.bun-cache/
+
+# Private audit docs (gitignored anyway; double-belt)
+docs/audit-*.PRIVATE.md
+*.PRIVATE.md
+
+# Docker / devcontainer config doesn't need to re-enter the image
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.override.yml
+.devcontainer/
