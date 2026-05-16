@@ -1,0 +1,103 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Braid Agent",
+  "description": "Schema for flows/<name>/agents/*.yaml. Slice 90. Authority: architectural decision 7f86f4da.",
+  "type": "object",
+  "required": ["name", "system"],
+  "additionalProperties": false,
+  "definitions": {
+    "model": {
+      "description": "Anthropic model selector. Either a bare model ID string or an object with id + optional speed.",
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "required": ["id"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "speed": { "enum": ["standard", "fast", "slow"] }
+          }
+        }
+      ]
+    },
+    "permissionPolicy": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["always_allow", "always_ask"] }
+      }
+    },
+    "tool": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": true,
+      "properties": {
+        "type": { "type": "string" },
+        "mcp_server_name": { "type": "string" },
+        "default_config": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "permission_policy": { "$ref": "#/definitions/permissionPolicy" }
+          }
+        },
+        "configs": { "type": "array" }
+      }
+    },
+    "mcpServer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string" },
+        "url": { "type": "string", "format": "uri" },
+        "name": { "type": "string" }
+      }
+    }
+  },
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique identifier for the agent. Convention: braid-<flow>-<role>."
+    },
+    "description": {
+      "type": "string",
+      "description": "One-line role summary. Shown in dashboards."
+    },
+    "model": { "$ref": "#/definitions/model" },
+    "system": {
+      "type": "string",
+      "minLength": 1,
+      "description": "System prompt. Authors the agent's behavior."
+    },
+    "tools": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/tool" }
+    },
+    "mcp_servers": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/mcpServer" }
+    },
+    "skills": {
+      "type": "array"
+    },
+    "metadata": {
+      "type": "object"
+    },
+    "multiagent": {
+      "description": "Coordinator linkage. Populated by `braid pull` from the Anthropic-side agent definition; set indirectly via `coordinator: [...]` in flow.yaml.",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "type": { "type": "string" },
+        "agents": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
+      }
+    }
+  }
+}

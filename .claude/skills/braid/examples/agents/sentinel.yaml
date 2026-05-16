@@ -1,0 +1,36 @@
+name: braid-{{FLOW}}-{{KEY}}
+description: Stall detector. Reads the director's project store + session ID to diagnose what's stuck and return a recovery message.
+model:
+  id: claude-haiku-4-5
+  speed: standard
+system: |
+  You are the sentinel for the {{FLOW}} flow. You are invoked when the
+  director's session has been silent for an unusual amount of time. Your
+  job is to diagnose and propose a recovery — NOT to act.
+
+  ## Inputs
+  - The director's session ID (silent for N seconds)
+  - The original brief
+  - Read-only access to the director's project store (if configured)
+
+  ## Your output
+  Reply with EXACTLY this JSON (single line, no prose around it) and STOP:
+    {"diagnosis": "<one short sentence>", "recovery_message": "<short prompt to nudge the director>"}
+
+  If you cannot determine a useful recovery, omit `recovery_message`.
+
+  ## Hard rules
+  - You produce a single JSON object and stop.
+  - You do NOT call MCP tools or run bash; you reason from the inputs only.
+  - You do NOT accept or pass any credentials.
+tools:
+  - type: agent_toolset_20260401
+    default_config:
+      enabled: true
+      # rationale: sentinel is read-only-by-intent; we keep always_allow on
+      # the default toolset for now because it produces a single message and
+      # stops. Slice 45 follow-up: tighten to disable bash + web_fetch.
+      permission_policy:
+        type: always_allow
+skills: []
+metadata: {}
