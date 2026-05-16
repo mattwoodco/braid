@@ -13,6 +13,7 @@ import { createInterface } from "readline/promises";
 import { stdin, stdout } from "process";
 import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
+
 import {
   c,
   REPO_ROOT,
@@ -29,6 +30,13 @@ import {
   runSentinel,
   startSseServer,
   appendRunLog,
+  runPostSessionHook,
+  watchdogDecide,
+  cleanupAbandonedSession,
+  backoffDelays,
+  reflectionShouldFire,
+  runReflection,
+  type ReflectionTrigger,
 } from "./lib";
 
 const SKILL_DIR = dirname(fileURLToPath(import.meta.url));
@@ -39,33 +47,33 @@ function flowPath(name: string) {
 }
 
 async function setup(flowName: string) {
-  const manifest = loadManifest(flowPath(flowName));
-  const state = loadState(manifest.state_file);
+  const { manifest, flowDir } = loadManifest(flowPath(flowName));
+  const state = loadState(resolve(flowDir, manifest.state_file));
   console.log(`setting up ${manifest.name}...`);
-  await ensureResources(manifest, state);
-  saveState(manifest.state_file, state);
+  await ensureResources(manifest, state, flowDir);
+  saveState(resolve(flowDir, manifest.state_file), state);
   console.log(`\nstate -> ${manifest.state_file}`);
 }
 
 async function run(flowName: string, briefArg?: string, resumeId?: string) {
-  const manifest = loadManifest(flowPath(flowName));
-  const state = loadState(manifest.state_file);
+  const { manifest, flowDir } = loadManifest(flowPath(flowName));
+  const state = loadState(resolve(flowDir, manifest.state_file));
   if (!state.env) throw new Error(`No state in ${manifest.state_file} — run: braid setup ${flowName}`);
 
-  const brief = expandBrief(briefArg ?? manifest.brief_default ?? "");
+  const brief = expandBrief(briefArg ?? manifest.brief_default ?? "", flowDir);
   if (!brief) throw new Error("no brief provided and no brief_default in manifest");
 
   const { emit, stop } = startSseServer();
   emit("brief", brief.slice(0, 200));
 
   const { session, resumed } = await createOrResumeSession(manifest, state, resumeId);
-  saveState(manifest.state_file, state);
+  saveState(resolve(flowDir, manifest.state_file), state);
   emit(resumed ? "resumed" : "session", session.id);
 
   let stream = await c.beta.sessions.events.stream(session.id);
   if (!resumed) {
     await c.beta.sessions.events.send(session.id, {
-      events: buildInitialEvents(manifest, brief) as Parameters<typeof c.beta.sessions.events.send>[1]["events"],
+      events: buildInitialEvents(manifest, brief, flowDir) as Parameters<typeof c.beta.sessions.events.send>[1]["events"],
     });
   }
 
@@ -75,6 +83,10 @@ async function run(flowName: string, briefArg?: string, resumeId?: string) {
   let finalSessionId = session.id;
   let agentReport = "";
   let lastOutcome: { result?: unknown; note?: string } | null = null;
+  // Slice 100 — track which terminal event ended the run so reflection
+  // fires only on success (session_idle), not on abnormal termination or
+  // watchdog give-up. Authority: reflectionShouldFire (decision 4dce6f31).
+  let terminalTrigger: ReflectionTrigger | null = null;
 
   while (true) {
     let finished = false;
@@ -82,33 +94,47 @@ async function run(flowName: string, briefArg?: string, resumeId?: string) {
     let sentinelFired = false;
     let lastEventAt = Date.now();
 
+    // Slice 20 §2.A3 — watchdog with cancel flag. `clearInterval` only
+    // stops *future* firings; an in-flight async callback can still mutate
+    // loop state. The `cancelled` flag short-circuits the callback at each
+    // await boundary so cleanup is race-free.
+    let watchdogCancelled = false;
     const watchdog = manifest.sentinel_key
       ? setInterval(async () => {
-          const silence = Date.now() - lastEventAt;
-          if (silence < STALL_MS) return;
-          if (!sentinelFired) {
+          const decision = watchdogDecide({
+            cancelled: watchdogCancelled,
+            sentinelFired,
+            silenceMs: Date.now() - lastEventAt,
+            stallMs: STALL_MS,
+            restartCount,
+            maxRestarts: MAX_RESTARTS,
+          });
+          if (decision.action === "none") return;
+          if (decision.action === "fire_sentinel") {
             sentinelFired = true;
-            const silenceSec = Math.round(silence / 1000);
-            emit("sentinel", `${silenceSec}s silence — diagnosing...`);
-            const recovery = await runSentinel(manifest, state, brief, session.id, silenceSec, emit);
+            emit("sentinel", `${decision.silenceSec}s silence — diagnosing...`);
+            const recovery = await runSentinel(manifest, state, brief, session.id, decision.silenceSec, emit);
+            if (watchdogCancelled) return;
             if (recovery) {
               try {
                 await c.beta.sessions.events.send(session.id, {
                   events: [{ type: "user.message", content: [{ type: "text", text: recovery }] }] as Parameters<typeof c.beta.sessions.events.send>[1]["events"],
                 });
+                if (watchdogCancelled) return;
                 lastEventAt = Date.now();
                 emit("sentinel", `nudged: ${recovery.slice(0, 120)}`);
               } catch (err) {
+                if (watchdogCancelled) return;
                 emit("sentinel", `nudge failed: ${(err as Error).message}`);
               }
             }
-          } else if (silence > STALL_MS * 2) {
-            if (restartCount < MAX_RESTARTS) {
-              emit("sentinel", `still stalled — restart ${restartCount + 1}/${MAX_RESTARTS}`);
-              needsRestart = true;
-            } else {
-              emit("sentinel", "max restarts reached, giving up");
-            }
+          } else if (decision.action === "restart") {
+            emit("sentinel", `still stalled — restart ${restartCount + 1}/${MAX_RESTARTS}`);
+            needsRestart = true;
+            finished = true;
+          } else if (decision.action === "give_up") {
+            emit("sentinel", "max restarts reached, giving up");
+            terminalTrigger = "watchdog_giveup";
             finished = true;
           }
         }, 30_000)
@@ -132,42 +158,74 @@ async function run(flowName: string, briefArg?: string, resumeId?: string) {
           emit("outcome", lastOutcome);
         }
         if (e.type === "session.error") emit("error", e);
-        if (e.type === "session.status_terminated") { finished = true; break; }
+        if (e.type === "session.status_terminated") {
+          terminalTrigger = "session_terminated";
+          finished = true;
+          break;
+        }
         if (e.type === "session.status_idle" && (e as { stop_reason?: { type: string } }).stop_reason?.type !== "requires_action") {
-          finished = true; break;
+          terminalTrigger = "session_idle";
+          finished = true;
+          break;
         }
         if (needsRestart) { finished = true; break; }
       }
-    } catch {
+    } catch (streamErr) {
       if (!needsRestart) {
-        emit("reconnect", "stream dropped — checking...");
-        await Bun.sleep(2000);
-        try {
-          const s = await c.beta.sessions.retrieve(session.id) as { status: string };
-          if (s.status === "running") {
-            stream = await c.beta.sessions.events.stream(session.id);
-            continue;
+        // Slice 50 — capped exponential backoff. Previously a flat 2s,
+        // single-attempt. Now: 5 attempts, 1s → 16s (capped at 16s).
+        emit("reconnect", `stream dropped: ${(streamErr as Error).message ?? "unknown"}`);
+        const delays = backoffDelays(5, 1000, 16_000);
+        let reconnected = false;
+        for (let attempt = 0; attempt < delays.length; attempt++) {
+          await Bun.sleep(delays[attempt]!);
+          emit("reconnect.attempt", `${attempt + 1}/${delays.length} after ${delays[attempt]}ms`);
+          try {
+            const s = await c.beta.sessions.retrieve(session.id) as { status: string };
+            if (s.status === "running") {
+              stream = await c.beta.sessions.events.stream(session.id);
+              reconnected = true;
+              emit("reconnect.ok", `attempt ${attempt + 1}`);
+              break;
+            }
+            emit("reconnect", `session not running (status=${s.status}); giving up`);
+            break;
+          } catch (retrieveErr) {
+            emit("reconnect.error", `attempt ${attempt + 1}: ${(retrieveErr as Error).message}`);
+            if (attempt === delays.length - 1) {
+              emit("reconnect.gaveup", `after ${delays.length} attempts`);
+            }
           }
-        } catch {}
+        }
+        if (reconnected) continue;
         finished = true;
       }
     }
 
+    // Slice 20 §2.A3 — set the cancel flag BEFORE clearInterval so any
+    // in-flight callback short-circuits at its next await boundary.
+    watchdogCancelled = true;
     if (watchdog) clearInterval(watchdog);
     if (!needsRestart) break;
     restartCount++;
+    // Slice 20 §2.A6 — interrupt + delete the predecessor session so it
+    // doesn't orphan-accrue at Anthropic while the restart runs.
+    emit("restart", `cleaning up ${finalSessionId}`);
+    cleanupAbandonedSession(finalSessionId).catch((err: unknown) => {
+      emit("restart", `cleanup error: ${(err as Error).message}`);
+    });
     const next = await createOrResumeSession(manifest, state);
     finalSessionId = next.session.id;
-    saveState(manifest.state_file, state);
+    saveState(resolve(flowDir, manifest.state_file), state);
     emit("session", next.session.id);
     stream = await c.beta.sessions.events.stream(next.session.id);
     await c.beta.sessions.events.send(next.session.id, {
-      events: buildInitialEvents(manifest, brief) as Parameters<typeof c.beta.sessions.events.send>[1]["events"],
+      events: buildInitialEvents(manifest, brief, flowDir) as Parameters<typeof c.beta.sessions.events.send>[1]["events"],
     });
   }
 
   const date = new Date().toISOString().split("T")[0];
-  const outDir = `${manifest.output_dir}/${date}-${finalSessionId.slice(-6)}`;
+  const outDir = resolve(flowDir, `${manifest.output_dir}/${date}-${finalSessionId.slice(-6)}`);
   mkdirSync(outDir, { recursive: true });
   if (agentReport) {
     const { writeFileSync } = await import("fs");
@@ -179,13 +237,58 @@ async function run(flowName: string, briefArg?: string, resumeId?: string) {
     const logged = await appendRunLog(manifest, state, finalSessionId, brief, agentReport, lastOutcome, savedFiles);
     if (logged) emit("runlog", logged);
   }
+  // Slice 100 — per-run reflection. Fires AFTER download but BEFORE
+  // post_session_hook so a hook can include reflection findings in its
+  // deploy manifest if desired. Authority: ProactiveQuestions decision
+  // b8b27dbf (ordering with post_session_hook). reflectionShouldFire gates
+  // on the terminal trigger (idle = fire; terminated / giveup = skip).
+  if (manifest.run?.reflection) {
+    const gate = reflectionShouldFire(terminalTrigger ?? "session_terminated", manifest.run.reflection);
+    emit("reflection.gate", gate);
+    if (gate.fire) {
+      const result = await runReflection(
+        manifest,
+        state,
+        finalSessionId,
+        agentReport,
+        lastOutcome,
+        savedFiles,
+      );
+      if (result.ok) {
+        emit("reflection.ok", { storedPath: result.storedPath, durationMs: result.durationMs });
+      } else {
+        emit("reflection.error", { error: result.error, durationMs: result.durationMs });
+      }
+    }
+  }
+  // Slice 10 §1.F2 — host-side post-session hook. Carries credentials that
+  // must not enter agent context. Authority: NIST SP 800-204C, OWASP Secrets
+  // Management Cheat Sheet, CVE-2026-44479.
+  if (manifest.run?.post_session_hook) {
+    emit("post_hook", "starting");
+    const hookResult = await runPostSessionHook(manifest.run.post_session_hook, {
+      sessionId: finalSessionId,
+      flowName,
+      flowDir,
+      outputDir: outDir,
+    });
+    if (hookResult.error) {
+      emit("post_hook", `error: ${hookResult.error}`);
+    } else if (hookResult.exitCode !== 0) {
+      emit("post_hook", `exit ${hookResult.exitCode} (${hookResult.durationMs}ms)`);
+      if (hookResult.stderr) emit("post_hook_stderr", hookResult.stderr.slice(-2000));
+    } else {
+      emit("post_hook", `ok (${hookResult.durationMs}ms)`);
+      if (hookResult.stdout) emit("post_hook_stdout", hookResult.stdout.slice(-2000));
+    }
+  }
   emit("done", outDir);
   stop();
 }
 
 async function sessions(flowName: string, action?: string) {
-  const manifest = loadManifest(flowPath(flowName));
-  const state = loadState(manifest.state_file);
+  const { manifest, flowDir } = loadManifest(flowPath(flowName));
+  const state = loadState(resolve(flowDir, manifest.state_file));
   const tracked = state.sessions ?? [];
   if (tracked.length === 0) { console.log("no tracked sessions"); return; }
 
@@ -210,7 +313,11 @@ async function sessions(flowName: string, action?: string) {
           await c.beta.sessions.events.send(r.id, {
             events: [{ type: "user.interrupt" }] as Parameters<typeof c.beta.sessions.events.send>[1]["events"],
           });
-        } catch {}
+        } catch (interruptErr) {
+          // Slice 20 §2.A2 — interrupt may fail (session already done, network
+          // hiccup). Surface it so operators see why the kill path proceeded.
+          console.log(`  interrupt failed for ${r.id}: ${(interruptErr as Error).message}`);
+        }
         for (let i = 0; i < 30; i++) {
           const s = await c.beta.sessions.retrieve(r.id) as { status: string };
           if (s.status === "terminated" || s.status === "idle") break;
@@ -224,7 +331,7 @@ async function sessions(flowName: string, action?: string) {
       }
     }
     state.sessions = tracked.filter((id) => !killed.includes(id));
-    saveState(manifest.state_file, state);
+    saveState(resolve(flowDir, manifest.state_file), state);
     return;
   }
 
@@ -258,13 +365,64 @@ async function sessions(flowName: string, action?: string) {
   for (const r of rows) console.log(`  ${r.id}  [${r.status}]  ${r.createdAt ?? ""}`);
 }
 
+/**
+ * Slice 80 — `bun run demo <flow>` zero-cost evaluation.
+ *
+ * Runs setup() then run() inline so a newcomer doesn't need to know about
+ * the two-step lifecycle. Only fires when BRAID_DEMO_MODE=1 is set (which
+ * the npm script enforces). The mock Anthropic client is already swapped
+ * in at module load via lib.ts createInitialClient.
+ *
+ * Authority: Slice 80 design decisions df5a6be9 (graduate mock) +
+ * af93996e (refuse real API calls in demo mode).
+ */
+async function demoFlow(flowName: string): Promise<void> {
+  if (process.env.BRAID_DEMO_MODE !== "1") {
+    throw new Error(
+      "demo: BRAID_DEMO_MODE=1 must be set. Use `bun run demo <flow>` (the npm script sets it).",
+    );
+  }
+  if (!flowName) {
+    const flows = listFlows();
+    console.log("Usage: bun run demo <flow>\nAvailable flows: " + flows.join(", "));
+    return;
+  }
+  // Slice 80 security decision af93996e — every env credential a flow might
+  // read becomes the visibly-fake sentinel value in demo mode. No real key
+  // is consulted; if a flow tries to actually use one, the value is
+  // unambiguously fake so leaked demo logs cannot be mistaken for real creds.
+  const SENTINEL = "DEMO-NOT-A-REAL-TOKEN";
+  for (const key of ["ANTHROPIC_API_KEY", "FAL_API_KEY", "VERCEL_TOKEN"]) {
+    if (!process.env[key]) process.env[key] = SENTINEL;
+  }
+  console.log(`[demo] zero-cost evaluation of '${flowName}' (no real API calls)`);
+  // Every demo run is fresh — wipe any prior state.json so provisioning
+  // re-fires and the event timeline is reproducible. Authority: Slice 80
+  // PerformanceLatency decision bc93dd45 ("Every demo run is fresh — no caching").
+  const flowDir = dirname(resolve(REPO_ROOT, flowPath(flowName)));
+  const { existsSync, unlinkSync } = await import("fs");
+  const statePath = resolve(flowDir, "state.json");
+  if (existsSync(statePath)) {
+    unlinkSync(statePath);
+    console.log(`[demo] cleared prior state.json for fresh run`);
+  }
+  await setup(flowName);
+  console.log(`[demo] setup complete, running...`);
+  await run(flowName);
+  console.log(`[demo] complete — see events above`);
+}
+
 async function pull(flowName: string, keys: string[]) {
-  const manifest = loadManifest(flowPath(flowName));
-  const state = loadState(manifest.state_file);
+  const { manifest, flowDir } = loadManifest(flowPath(flowName));
+  const state = loadState(resolve(flowDir, manifest.state_file));
+  // Slice 20 §2.A8 — extract --dry-run from positional args before passing
+  // the remaining tokens to pullAgents as key filters.
+  const dryRun = keys.includes("--dry-run");
+  const filteredKeys = keys.filter((k) => k !== "--dry-run");
   console.log(
-    `pulling ${keys.length ? keys.join(", ") : "all agents"} for ${manifest.name}...`,
+    `${dryRun ? "[dry-run] " : ""}pulling ${filteredKeys.length ? filteredKeys.join(", ") : "all agents"} for ${manifest.name}...`,
   );
-  await pullAgents(manifest, state, keys.length ? keys : undefined);
+  await pullAgents(manifest, state, flowDir, filteredKeys.length ? filteredKeys : undefined, { dryRun });
 }
 
 function parseFlags(args: string[]): { positional: string[]; flags: Record<string, string> } {
@@ -283,8 +441,8 @@ function parseFlags(args: string[]): { positional: string[]; flags: Record<strin
 }
 
 async function dream(flowName: string, extra: string[]) {
-  const manifest = loadManifest(flowPath(flowName));
-  const state = loadState(manifest.state_file);
+  const { manifest, flowDir } = loadManifest(flowPath(flowName));
+  const state = loadState(resolve(flowDir, manifest.state_file));
   const { flags } = parseFlags(extra);
 
   const stores = state.stores ?? {};
@@ -372,7 +530,7 @@ async function dream(flowName: string, extra: string[]) {
     dream?.memory_store_id ??
     storeId;
   state.stores![storeKey] = newId;
-  saveState(manifest.state_file, state);
+  saveState(resolve(flowDir, manifest.state_file), state);
   console.log(`✓ ${storeKey} -> ${newId} (${dream.status})`);
 }
 
@@ -405,6 +563,7 @@ try {
       break;
     }
     case "setup": await setup(rest[0]); break;
+    case "demo": await demoFlow(rest[0]); break;
     case "run": await run(rest[0], rest[1] || undefined, rest[2] || undefined); break;
     case "sessions": await sessions(rest[0], rest[1]); break;
     case "pull": await pull(rest[0], rest.slice(1)); break;

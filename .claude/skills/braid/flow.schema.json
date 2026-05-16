@@ -1,6 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Braid Flow Manifest",
+  "description": "Schema for flows/<name>/flow.yaml. Kept in sync with the `Manifest` TypeScript type in lib.ts. Slice 30 §3.S1.",
   "type": "object",
   "required": ["name", "agents"],
   "additionalProperties": false,
@@ -22,58 +23,103 @@
           }
         }
       }
-    }
-  },
-  "properties": {
-    "name": { "type": "string" },
-    "env_name": { "type": "string" },
-    "state_file": { "type": "string" },
-    "output_dir": { "type": "string" },
-    "brief_default": { "type": "string" },
-    "sentinel_key": { "type": "string" },
-    "vault": { "$ref": "#/definitions/vaultEntry" },
-    "vaults": {
-      "type": "array",
-      "items": { "$ref": "#/definitions/vaultEntry" }
     },
-    "memory_stores": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["key", "name"],
-        "additionalProperties": false,
-        "properties": {
-          "key": { "type": "string" },
-          "name": { "type": "string" },
-          "access": { "enum": ["read_only", "read_write"] },
-          "instructions": { "type": "string" },
-          "seed": {
-            "type": "object",
-            "required": ["mount", "files"],
-            "additionalProperties": false,
-            "properties": {
-              "mount": { "type": "string" },
-              "files": { "type": "array", "items": { "type": "string" } }
-            }
+    "memoryStore": {
+      "type": "object",
+      "required": ["key", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "key": { "type": "string" },
+        "name": { "type": "string" },
+        "access": { "enum": ["read_only", "read_write"] },
+        "instructions": { "type": "string" },
+        "dream_instructions": { "type": "string" },
+        "seed": {
+          "type": "object",
+          "required": ["mount", "files"],
+          "additionalProperties": false,
+          "properties": {
+            "mount": { "type": "string" },
+            "files": { "type": "array", "items": { "type": "string" } }
           }
         }
       }
     },
-    "agents": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "required": ["key", "file"],
-        "additionalProperties": false,
-        "properties": {
-          "key": { "type": "string" },
-          "file": { "type": "string" },
-          "is_director": { "type": "boolean" },
-          "coordinator": { "type": "array", "items": { "type": "string" } },
-          "mcp_servers": { "type": "array" },
-          "tools": { "type": "array" }
+    "networking": {
+      "description": "Sandbox network policy. Default (when omitted) is `limited` with empty allowed_hosts. Authority: https://platform.claude.com/docs/en/managed-agents/environments",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": { "const": "unrestricted" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": { "const": "limited" },
+            "allowed_hosts": { "type": "array", "items": { "type": "string" } },
+            "allow_mcp_servers": { "type": "boolean" },
+            "allow_package_managers": { "type": "boolean" }
+          }
         }
+      ]
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "networking": { "$ref": "#/definitions/networking" }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "required": ["key", "file"],
+      "additionalProperties": false,
+      "properties": {
+        "key": { "type": "string" },
+        "file": { "type": "string" },
+        "is_director": { "type": "boolean" },
+        "coordinator": { "type": "array", "items": { "type": "string" } },
+        "mcp_servers": { "type": "array" },
+        "tools": { "type": "array" }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "required": ["description"],
+      "additionalProperties": false,
+      "properties": {
+        "description": { "type": "string" },
+        "rubric_file": { "type": "string" },
+        "max_iterations": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "postSessionHook": {
+      "description": "Host-side hook executed AFTER the session ends. Slice 10 §1.F2. Authority: NIST SP 800-204C, OWASP Secrets Management Cheat Sheet, CVE-2026-44479.",
+      "type": "object",
+      "required": ["command"],
+      "additionalProperties": false,
+      "properties": {
+        "command": { "type": "string" },
+        "cwd": { "type": "string" },
+        "env_passthrough": { "type": "array", "items": { "type": "string" } },
+        "timeout_ms": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "reflection": {
+      "description": "Per-run reflection config. Slice 100. Authority: architectural decision 4dce6f31; mirrors Hermes Agent automatic reflection cycle.",
+      "type": "object",
+      "required": ["agent_key", "target_store"],
+      "additionalProperties": false,
+      "properties": {
+        "agent_key": { "type": "string" },
+        "target_store": { "type": "string" },
+        "instructions": { "type": "string" }
       }
     },
     "run": {
@@ -84,17 +130,36 @@
         "attach_stores": { "type": "boolean" },
         "stall_ms": { "type": "integer", "minimum": 0 },
         "max_restarts": { "type": "integer", "minimum": 0 },
-        "outcome": {
-          "type": "object",
-          "required": ["description"],
-          "additionalProperties": false,
-          "properties": {
-            "description": { "type": "string" },
-            "rubric_file": { "type": "string" },
-            "max_iterations": { "type": "integer", "minimum": 1 }
-          }
-        }
+        "log_runs": { "type": "boolean" },
+        "sentinel_context_store": { "type": "string" },
+        "outcome": { "$ref": "#/definitions/outcome" },
+        "post_session_hook": { "$ref": "#/definitions/postSessionHook" },
+        "reflection": { "$ref": "#/definitions/reflection" }
       }
     }
+  },
+  "properties": {
+    "name": { "type": "string" },
+    "env_name": { "type": "string" },
+    "state_file": { "type": "string" },
+    "output_dir": { "type": "string" },
+    "brief_default": { "type": "string" },
+    "sentinel_key": { "type": "string" },
+    "environment": { "$ref": "#/definitions/environment" },
+    "vault": { "$ref": "#/definitions/vaultEntry" },
+    "vaults": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/vaultEntry" }
+    },
+    "memory_stores": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/memoryStore" }
+    },
+    "agents": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/agent" }
+    },
+    "run": { "$ref": "#/definitions/run" }
   }
 }

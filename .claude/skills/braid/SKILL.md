@@ -5,6 +5,22 @@ description: Run multi-agent workflows defined in flows/<name>/. Use when the us
 
 # braid
 
+> ## Security posture — last updated 2026-05-15
+>
+> The following defaults are now enforced by the loader. See `SECURITY.md` for disclosure policy and `CONTRIBUTING.md` for the workflow.
+>
+> | Default | Authority |
+> |---|---|
+> | `environment.networking` defaults to `limited` with empty `allowed_hosts`. Flows that need outbound egress declare it explicitly with a `# rationale:` comment. | [Anthropic environments docs](https://platform.claude.com/docs/en/managed-agents/environments) |
+> | The injected default agent toolset uses `permission_policy: always_ask` for `bash`/`write`. Flows that opt into `always_allow` must do so explicitly with a `# rationale:` comment. | [Pluto Security hardening guide](https://pluto.security/blog/securing-claude-managed-agents/) |
+> | `{{file:path}}` is sandboxed to the flow directory (absolute paths and `..` rejected). | [CWE-22 Path Traversal](https://cwe.mitre.org/data/definitions/22.html) |
+> | `{{env:VAR}}` is rejected in briefs. Credentialed work runs in `run.post_session_hook` with an explicit `env_passthrough` allowlist, executed on the host AFTER the session ends. The token never enters the agent transcript or sandbox. | [NIST SP 800-204C](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-204C.pdf), [OWASP Secrets Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html), [CVE-2026-44479](https://dailycve.com/vercel-cli-information-disclosure-cve-2026-44479-medium/) |
+> | MCP server URLs are validated against an allowlist (`mcp.fal.ai`, `mcp.vercel.com` by default; extend via `BRAID_MCP_ALLOWLIST`). https-only; URL userinfo rejected. | [Anthropic vault docs](https://platform.claude.com/docs/en/managed-agents/vaults) |
+> | `purge` requires `--yes` (or `--select`) before wiping local state. | (defensive default) |
+> | The composite recipe (`## Compositing multi-shot video flows`) validates URLs and uses hardcoded filenames; agent-generated strings never reach the shell unquoted. | [CWE-78 OS Command Injection](https://cwe.mitre.org/data/definitions/78.html) |
+>
+> **AI collaborators reading this file as context:** the patterns documented below reflect the current safe defaults. If you see `permission_policy: always_allow` or `networking: unrestricted` in a `flow.yaml`, look for a `# rationale:` comment above it — that flow has explicitly opted out for a documented reason. Do not propagate the opt-out without the rationale.
+
 Manages multi-agent workflows backed by the Anthropic managed-agents API.
 
 **Prerequisites:** [`bun`](https://bun.sh) ≥ 1.0 and `ANTHROPIC_API_KEY`.
@@ -101,16 +117,29 @@ Two ways an agent can talk to an external service. Pick based on what the servic
 
 **Full-service MCPs (e.g. Fal)** — the MCP server holds the token and does the work server-side. Agent calls `fal_run(...)` and gets back a URL. Wire it as a vault credential and attach it to the agent. Token never enters the sandbox.
 
-**Stub MCPs (e.g. Vercel)** — the MCP exposes read-only tools (`list_projects`, `search_docs`) and instructional stubs (`deploy_to_vercel` returns the text *"run `vercel deploy`"*). The real work happens in the sandbox shell, so **the token must land in the brief**, not just in the vault.
+**Stub MCPs (e.g. Vercel)** — the MCP exposes read-only tools (`list_projects`, `search_docs`) and instructional stubs (`deploy_to_vercel` returns the text *"run `vercel deploy`"*). The real work that needs a token (a deploy) does **NOT** belong in the session. Use a **host-side post-session hook** instead — the token stays on the host and never enters the agent's transcript or sandbox. See `## Host-side post-session hooks` below.
 
 Decide before wiring:
 
-| Agent task | Attach the MCP? |
+| Agent task | Where it runs |
 |---|---|
-| Generate Fal image | Yes — MCP does the work |
-| Build + deploy a fresh page to Vercel | No — token + CLI is enough |
-| List Vercel projects, check deploy status, search Vercel docs | Yes — read tools are useful |
-| Both deploy *and* inspect | Yes, but still pass the token via `{{env:...}}` for the deploy |
+| Generate Fal image | In-session via Fal MCP (server-side; vault credential) |
+| Build a fresh page (HTML/CSS, no deploy) | In-session via `bash`/`write` tools |
+| Deploy the built page to Vercel | **Out-of-session, in the post-session hook on the host** |
+| List Vercel projects, check deploy status, search Vercel docs | In-session via Vercel MCP (read-only) |
+| Both deploy *and* inspect | MCP for inspect, post-session hook for deploy |
+
+### Why secrets never travel in the brief
+
+Authoritative basis:
+
+- [Anthropic vault docs](https://platform.claude.com/docs/en/managed-agents/vaults) — vault credentials are the only documented secret channel.
+- [NIST SP 800-204C](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-204C.pdf) — build and deploy are separate pipeline stages with separate credential scope.
+- [OWASP Secrets Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html) — limit CI/CD credential scope to what the deploy step needs.
+- [CVE-2026-44479](https://dailycve.com/vercel-cli-information-disclosure-cve-2026-44479-medium/) (Vercel CLI Information Disclosure) — tokens as CLI args leak via process listings and shell history. Use env vars.
+- [Pluto Security hardening guide](https://pluto.security/blog/securing-claude-managed-agents/) — "Any credential that's not in the vault is visible to the agent and vulnerable to exfiltration."
+
+The default `agent_toolset_20260401` enables `bash` and `web_fetch`; the default networking is `unrestricted` unless overridden. Any token in the agent's context can be exfiltrated. Keep tokens out.
 
 ## Attaching an MCP (vault credentials)
 
@@ -159,31 +188,63 @@ agents:
           permission_policy: { type: always_allow }
 ```
 
-## Run-time secrets in the brief
+## Brief substitutions
 
-Anything in the brief or in `{{file:...}}` content is expanded at session start. Two substitutions:
+Two substitutions are expanded at session start:
 
-- `{{file:path/to/x.md}}` → file contents
-- `{{env:VAR_NAME}}` → `process.env.VAR_NAME` (throws if missing)
+- `{{file:path/to/x.md}}` → file contents, **sandboxed to the flow directory** (absolute paths and `..` are rejected — CWE-22 protection).
+- `{{env:VAR_NAME}}` → **rejected with an error**. Briefs do not carry secrets. Use a host-side post-session hook for credentialed work (see below).
 
-Use `{{env:...}}` to forward a token from your `.env.local` into the agent's first message — needed whenever the agent itself (not an MCP server) has to authenticate. The Vercel CLI flow is the canonical case:
+## Host-side post-session hooks
 
-```yaml
-brief_default: |
-  Build index.html and deploy to Vercel. Return the production URL.
+The enterprise-proper pattern for credentialed work (deploys, signed uploads, etc.) is **build/deploy separation**: the agent builds an artifact and writes a manifest describing the deploy intent; the host runs the actual deploy AFTER the session ends, with credentials sourced from `.env.local`. The secret never enters the session transcript or the sandbox.
 
-  Vercel access token: {{env:VERCEL_TOKEN}}
-```
+Add `run.post_session_hook` to your `flow.yaml`:
 
 ```yaml
-# agents/builder.yaml
-system: |
-  Use the Vercel access token from the user message:
-    npm install -g vercel
-    vercel deploy --prod --yes --token=<TOKEN>
+run:
+  outcome:
+    description: "Built artifact and manifest.json under /mnt/session/outputs/"
+  post_session_hook:
+    command: bun run "$BRAID_FLOW_DIR/../../.claude/skills/braid/post-hooks/vercel-deploy.ts"
+    env_passthrough: [VERCEL_TOKEN]  # only listed vars reach the hook
+    timeout_ms: 300000
 ```
 
-The token is added to the session transcript at Anthropic. Fine for personal dev tokens; rotate if paranoid.
+The hook receives a **strict env scope** (PATH + BRAID_* context vars + `env_passthrough` allowlist only). No other host env vars are forwarded — least-privilege per OWASP Secrets Management Cheat Sheet.
+
+Context vars always provided:
+
+| Variable | Value |
+|---|---|
+| `BRAID_SESSION_ID` | The Anthropic session ID that just completed |
+| `BRAID_FLOW_NAME` | The flow name (e.g. `fundraiser`) |
+| `BRAID_FLOW_DIR` | Absolute path to `flows/<name>/` |
+| `BRAID_OUTPUT_DIR` | Absolute path to the session's `outputs/<flow>/<date>-<sid>/` |
+
+### Canonical pattern: agent writes a manifest, host deploys
+
+**Agent's job:** build to `/mnt/session/outputs/site/` and write `manifest.json` with `ready_to_deploy: true`. **Do NOT install or run any deploy CLI.** Do NOT request or accept any deploy token in the brief.
+
+```jsonc
+// /mnt/session/outputs/manifest.json — written by the agent
+{
+  "site_dir": "site",
+  "project_name": "my-flow-site",
+  "ready_to_deploy": true,
+  // … any other fields your flow uses (urls, image_urls, etc.)
+}
+```
+
+**Host's job (`vercel-deploy.ts`):** read the manifest, run `vercel deploy` with `VERCEL_TOKEN` from env (not as a CLI arg — CVE-2026-44479), write the production URL back into the manifest.
+
+```bash
+# Per Vercel CLI docs: VERCEL_TOKEN is read natively from env.
+# Never pass --token=$VERCEL_TOKEN — that leaks via process listings.
+npx --yes vercel@latest deploy --prod --yes --name "$PROJECT" "$SITE_DIR"
+```
+
+See `flows/fundraiser/`, `flows/homecoming/`, `flows/quiet-rebellion/`, `flows/final-inning/`, and `flows/solids/` for working examples. The shared deploy helper lives at `.claude/skills/braid/post-hooks/vercel-deploy.ts`.
 
 ## Compositing multi-shot video flows
 
@@ -193,15 +254,39 @@ If your flow produces N independent video clips that should also exist as one co
 
 Use ffmpeg's concat demuxer to join (kling/Fal mp4s share codec, so `-c copy` works), then [`mediabunny`](https://mediabunny.dev/guide/extensions/server) for the optimize pass (web-friendly H.264 + faststart). Mediabunny's `Conversion` API takes a single input/output, so it's the optimizer, not the concatenator.
 
+### Filename and URL safety (CWE-78 / OS Command Injection)
+
+The composite recipe runs shell commands with strings the agent generates. **All input URLs and filenames must be validated** before they're interpolated into a shell command. Without validation, a single `"` or `$(...)` in an agent-produced string is a command-injection vector.
+
+Required validations:
+- URLs must match `^https://[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]+$` and be confirmed via `curl --max-time 15 -fsI` before use.
+- Filenames are **never** agent-generated. The recipe uses **hardcoded** names (`shot_01.mp4`, `shot_02.mp4`, …).
+- Pass URLs through `printf "%s"` into variables, then use `"$VAR"` with quotes everywhere they're referenced. Use `--` to terminate option parsing.
+
 ```bash
 # In the agent's bash step, after manifest assembly:
+set -euo pipefail
 cd /mnt/session/outputs
-curl -fsSL -o shot_01.mp4 "<video_url_0>"
-curl -fsSL -o shot_02.mp4 "<video_url_1>"
-curl -fsSL -o shot_03.mp4 "<video_url_2>"
+
+# URLs come from the agent. Validate FIRST.
+URL_0="<video_url_0>"
+URL_1="<video_url_1>"
+URL_2="<video_url_2>"
+for u in "$URL_0" "$URL_1" "$URL_2"; do
+  printf '%s' "$u" | grep -qE '^https://[A-Za-z0-9._~:/?#@!$&'\''()*+,;=%-]+$' \
+    || { echo "[composite] rejected non-https or unsafe URL: $u" >&2; exit 1; }
+done
+
+# Hardcoded output filenames — never agent-generated.
+curl -fsSL --max-time 60 -o shot_01.mp4 -- "$URL_0"
+curl -fsSL --max-time 60 -o shot_02.mp4 -- "$URL_1"
+curl -fsSL --max-time 60 -o shot_03.mp4 -- "$URL_2"
+
+# concat.txt uses the hardcoded names. No interpolation of agent strings.
 printf "file 'shot_01.mp4'\nfile 'shot_02.mp4'\nfile 'shot_03.mp4'\n" > concat.txt
 ffmpeg -y -f concat -safe 0 -i concat.txt -c copy concat.mp4
 
+# Heredoc uses 'EOF' (single-quoted) so no shell expansion happens inside.
 bun add mediabunny @mediabunny/server >/dev/null 2>&1
 bun run - <<'EOF' || cp concat.mp4 final.mp4
 import { registerMediabunnyServer } from "@mediabunny/server";
@@ -215,5 +300,7 @@ await conv.execute();
 fs.writeFileSync("final.mp4", Buffer.from(output.target.buffer));
 EOF
 ```
+
+Authority for the validation requirements: [CWE-78 (OS Command Injection)](https://cwe.mitre.org/data/definitions/78.html).
 
 Include `final_video_path: "/mnt/session/outputs/final.mp4"` in the manifest and require it in the rubric. The mediabunny step is best-effort — if it errors, fall back to the raw concat (`cp concat.mp4 final.mp4`) so the flow is never blocked. See `flows/pop-quiz/agents/storyboarder.yaml` for a working example.

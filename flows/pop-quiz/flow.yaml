@@ -2,6 +2,13 @@
 name: pop-quiz
 brief_default: "Scene: a Canada goose in a small brown corduroy blazer substitutes for the regular teacher in a 1970s-era public school classroom — arriving with a leather briefcase, presenting at the chalkboard with a wooden pointer, then grading papers at the desk while children work quietly."
 
+# rationale: showcase — agent downloads Fal-generated media via curl and runs
+# ffmpeg + mediabunny composite from the sandbox, requiring egress to Fal CDN +
+# npm registry. Slice 20 follow-up: scope to fal.media/fal.ai + registry hosts.
+environment:
+  networking:
+    type: unrestricted
+
 vault:
   display_name: fal-pop-quiz
   credential:

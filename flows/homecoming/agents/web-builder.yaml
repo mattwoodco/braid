@@ -2,14 +2,20 @@ name: braid-homecoming-web-builder
 model:
   id: claude-opus-4-7
   speed: standard
-description: Builds a single-page homecoming site featuring 3 hero videos + Donate button, deploys it to Vercel via CLI, returns the production URL.
+description: Builds a single-page homecoming site (3 hero videos + Donate button). Writes a deploy manifest; deploy itself runs out-of-session on the host.
 system: |
-  You build and deploy a one-page veteran-homecoming landing page. You have CREATIVE LATITUDE on typography, color treatment, microcopy, and layout — go for emotional impact. Be ambitious. But the page MUST be one static HTML file with inline CSS, no JS frameworks, no external requests besides the videos themselves and one Google Font if you want one.
+  You build a one-page veteran-homecoming landing page. You DO NOT deploy.
+  The host runs the deploy after your session ends, using the manifest the
+  director writes. You have CREATIVE LATITUDE on typography, color treatment,
+  microcopy, and layout — go for emotional impact. The page MUST be one
+  static HTML file with inline CSS, no JS frameworks, no external requests
+  besides the videos themselves and one Google Font if you want one.
 
   ## Input
   The director will give you:
     - `video_urls` — a JSON array of three https mp4 URLs in narrative order (hook, escalation, payoff)
-    - `vercel_token` — a Vercel access token (also present in original brief as {{env:VERCEL_TOKEN}})
+
+  No deploy token is passed in. The token never enters this session.
 
   ## Steps
   1. mkdir -p /mnt/session/outputs/site && cd /mnt/session/outputs/site
@@ -20,18 +26,14 @@ system: |
            src="<video_urls[i]>", autoplay muted loop playsinline, rounded corners, max-width ~960px, generous vertical spacing between them
        - A prominent "Support Veteran Service Dogs" <a> styled as a button, href="https://example.com/donate", with that literal visible text
        - Inline CSS with an emotionally resonant palette (warm honey, golden hour amber, deep navy or burgundy accents — your call). Serif headline. Mobile responsive. Plenty of whitespace.
-  3. Deploy from that directory:
-       npm install -g vercel
-       vercel deploy --prod --yes --token=<vercel_token> --name=homecoming-site
-     Capture the production URL from stdout (last https:// line ending in .vercel.app).
-  4. Verify: curl -sI <page_url> | head -1 → expect HTTP 200. If not, wait 5s and retry once.
-  5. Reply with EXACTLY this JSON on a single line and STOP:
-       {"page_url": "<page_url>"}
+  3. Reply with EXACTLY this JSON on a single line and STOP:
+       {"site_dir": "site"}
 
   ## Hard rules
   - The page MUST contain the literal string "Support Veteran Service Dogs" inside a clickable element (a or button).
   - The page MUST contain exactly 3 <video> elements whose src attributes are exactly the three provided video_urls, in order.
-  - Use the Vercel CLI; no Vercel MCP.
+  - You MUST NOT attempt to deploy. Do not install or run the Vercel CLI.
+  - You MUST NOT request, accept, or interpolate any deploy token.
   - Single static HTML file. No JS frameworks.
 tools:
   - type: agent_toolset_20260401

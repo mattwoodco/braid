@@ -5,6 +5,14 @@ state_file: state.json
 output_dir: outputs/ads
 brief_default: "60s viral ad for an indie hiking boot brand"
 
+# rationale: showcase — agents download Fal-generated media via curl from the
+# sandbox, which requires outbound egress beyond the MCP proxy. Slice 20 follow-up
+# will scope this to Fal's content CDN host(s) once the canonical host list is
+# documented. See SECURITY.md for the threat model.
+environment:
+  networking:
+    type: unrestricted
+
 vault:
   display_name: fal
   credential:
@@ -50,6 +58,9 @@ agents:
         mcp_server_name: fal
         default_config:
           enabled: true
+          # rationale: showcase — MCP tools return URLs/IDs; approval-bypass
+          # blast radius is bounded by the MCP server itself. Production posture
+          # should graduate to always_ask. Slice 45 follow-up.
           permission_policy: { type: always_allow }
   - key: director
     file: agents/director.yaml
