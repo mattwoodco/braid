@@ -1,0 +1,22 @@
+# Slice 70 — example operator override for opting into SSE port forwarding.
+#
+# Copy this file to `docker-compose.override.yml` and edit. Compose layers it
+# on top of docker-compose.yml automatically. This file is .gitignored
+# under the `docker-compose.override*` pattern so operator overrides don't
+# leak into the repo.
+#
+# What this override does:
+#   - Forwards the orchestrator's SSE port (BRAID_SSE_PORT) to host port 4000
+#     so an operator can `curl http://localhost:4000/stream` while a run is
+#     active.
+#
+# Trust note: enabling this opens an inbound port. Treat it as you would any
+# dev-server port. Don't enable in environments where untrusted code might
+# hit the host's network interface.
+
+services:
+  braid:
+    environment:
+      BRAID_SSE_PORT: 4000
+    ports:
+      - "127.0.0.1:4000:4000"  # 127.0.0.1 binding — never expose externally

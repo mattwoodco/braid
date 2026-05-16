@@ -1,0 +1,42 @@
+{
+  "$schema": "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.schema.json",
+  "name": "Braid orchestrator",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": ".."
+  },
+  // Slice 70 — devcontainer for VS Code "Reopen in Container".
+  // Authority: Slice 70 architectural decision b1d5f3d8.
+  // Matches docker-compose.yml mounts conceptually so behavior is consistent
+  // between `docker compose run` and "Open in Container".
+  "workspaceFolder": "/workspace",
+  "remoteUser": "braid",
+  "mounts": [
+    "source=${localWorkspaceFolder}/flows,target=/workspace/flows,type=bind,consistency=cached",
+    "source=${localWorkspaceFolder}/outputs,target=/workspace/outputs,type=bind,consistency=cached",
+    "source=${localWorkspaceFolder}/.claude/skills/braid,target=/workspace/.claude/skills/braid,type=bind,consistency=cached"
+  ],
+  "containerEnv": {
+    "BUN_INSTALL_CACHE_DIR": "/tmp/bun-cache"
+  },
+  // Bun is pinned by the Dockerfile; no features needed for runtime.
+  "features": {},
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "oven.bun-vscode",
+        "redhat.vscode-yaml",
+        "esbenp.prettier-vscode"
+      ],
+      "settings": {
+        "yaml.schemas": {
+          ".claude/skills/braid/flow.schema.json": ["flows/**/flow.yaml"]
+        },
+        "editor.formatOnSave": false
+      }
+    }
+  },
+  // Run after the container is created. Bun deps are already installed
+  // during the image build; this verifies the dev environment is healthy.
+  "postCreateCommand": "cd /workspace/.claude/skills/braid && bun --version && bun test --bail tests/no-silent-catch.test.ts"
+}
