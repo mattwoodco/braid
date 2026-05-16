@@ -5,3 +5,12 @@ outputs/
 node_modules/
 _docs
 .DS_Store
+
+# Private security documents — see docs/README.md
+docs/audit-*.md
+docs/audit-*.PRIVATE.md
+*.PRIVATE.md
+
+# Slice 70 — operator-specific docker-compose overrides
+docker-compose.override.yml
+docker-compose.override.*.yml
