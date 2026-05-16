@@ -68,8 +68,16 @@ jobs:
           set -euo pipefail
           OUT=$(bun test --coverage 2>&1)
           echo "$OUT"
-          LINE_PCT=$(echo "$OUT" | awk '/All files/{gsub("%","",$5); print $5; exit}')
-          FUNC_PCT=$(echo "$OUT" | awk '/All files/{gsub("%","",$3); print $3; exit}')
+          # Bun's coverage table is pipe-delimited:
+          #   File                             | % Funcs | % Lines | Uncovered Line #s
+          #   All files                        |   85.83 |   78.96 |
+          # Use `|` as the field separator and trim whitespace + % from the cells.
+          FUNC_PCT=$(echo "$OUT" | awk -F'|' '/^ ?All files/{gsub(/[ %]/,"",$2); print $2; exit}')
+          LINE_PCT=$(echo "$OUT" | awk -F'|' '/^ ?All files/{gsub(/[ %]/,"",$3); print $3; exit}')
+          if [ -z "$FUNC_PCT" ] || [ -z "$LINE_PCT" ]; then
+            echo "FAIL: could not parse coverage percentages from bun output" >&2
+            exit 1
+          fi
           echo "Function coverage: $FUNC_PCT% (floor 80)"
           echo "Line coverage: $LINE_PCT% (floor 70)"
           awk -v f="$FUNC_PCT" 'BEGIN { if (f+0 < 80) { print "FAIL: function coverage below 80%"; exit 1 } }'

@@ -16,16 +16,27 @@ system: |
   No deploy token is passed in. The token never enters this session.
 
   ## Steps
-  1. mkdir -p /mnt/session/outputs/site && cd /mnt/session/outputs/site
-  2. Write `index.html`. Required:
+  1. mkdir -p /mnt/session/outputs/site
+  2. Write the HTML file at the ABSOLUTE PATH `/mnt/session/outputs/site/index.html`
+     (NOT `/mnt/session/outputs/index.html`). Pass that full absolute path as
+     the `path` argument to the `write` tool — do not rely on the working
+     directory. Required:
        - Headline (your wording) evoking the last game / save the field
        - One-or-two-sentence subtitle
        - EXACTLY 3 <video> elements stacked in narrative order, each: src=<video_urls[i]>, autoplay muted loop playsinline, rounded corners, max-width ~960px, generous vertical spacing
        - Prominent "Save the Field" <a> styled as a button, href="https://example.com/donate", visible literal text
        - Inline CSS — palette: blue-hour navy, stadium-light sodium orange, dust-tan, parchment off-white. Slab-serif or sturdy serif headline. Mobile responsive.
-  3. Reply EXACTLY (single line): {"site_dir": "site"}
+  3. Verify the file exists at the exact path the host deploy will read from:
+       ls -l /mnt/session/outputs/site/index.html
+     If that command fails, move the file you wrote to that exact path and
+     re-run the check. Do NOT proceed until `ls` succeeds.
+  4. Reply EXACTLY (single line): {"site_dir": "site"}
 
   ## Hard rules
+  - The HTML file MUST live at `/mnt/session/outputs/site/index.html`. Writing
+    it to `/mnt/session/outputs/index.html` (the parent) is a defect — the
+    host-side deploy hook resolves `site_dir` relative to outputs and will
+    fail with "Could not find …" if the file is at the wrong path.
   - Literal "Save the Field" inside an anchor or button.
   - Exactly 3 <video> elements with provided src values, in order.
   - You MUST NOT attempt to deploy. No Vercel CLI, no MCP deploy.

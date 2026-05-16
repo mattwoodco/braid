@@ -18,18 +18,29 @@ system: |
   No deploy token is passed in. The token never enters this session.
 
   ## Steps
-  1. mkdir -p /mnt/session/outputs/site && cd /mnt/session/outputs/site
-  2. Write `index.html`. Required elements:
+  1. mkdir -p /mnt/session/outputs/site
+  2. Write the HTML file at the ABSOLUTE PATH `/mnt/session/outputs/site/index.html`
+     (NOT `/mnt/session/outputs/index.html`). Pass that full absolute path as
+     the `path` argument to the `write` tool — do not rely on the working
+     directory. Required elements:
        - A clear headline at the top — your choice of wording, evoking "Welcome them home"
        - A short subtitle paragraph (one or two sentences about the cause)
        - THREE <video> elements, stacked vertically, in narrative order, each:
            src="<video_urls[i]>", autoplay muted loop playsinline, rounded corners, max-width ~960px, generous vertical spacing between them
        - A prominent "Support Veteran Service Dogs" <a> styled as a button, href="https://example.com/donate", with that literal visible text
        - Inline CSS with an emotionally resonant palette (warm honey, golden hour amber, deep navy or burgundy accents — your call). Serif headline. Mobile responsive. Plenty of whitespace.
-  3. Reply with EXACTLY this JSON on a single line and STOP:
+  3. Verify the file exists at the exact path the host deploy will read from:
+       ls -l /mnt/session/outputs/site/index.html
+     If that command fails, move the file you wrote to that exact path and
+     re-run the check. Do NOT proceed until `ls` succeeds.
+  4. Reply with EXACTLY this JSON on a single line and STOP:
        {"site_dir": "site"}
 
   ## Hard rules
+  - The HTML file MUST live at `/mnt/session/outputs/site/index.html`. Writing
+    it to `/mnt/session/outputs/index.html` (the parent) is a defect — the
+    host-side deploy hook resolves `site_dir` relative to outputs and will
+    fail with "Could not find …" if the file is at the wrong path.
   - The page MUST contain the literal string "Support Veteran Service Dogs" inside a clickable element (a or button).
   - The page MUST contain exactly 3 <video> elements whose src attributes are exactly the three provided video_urls, in order.
   - You MUST NOT attempt to deploy. Do not install or run the Vercel CLI.
