@@ -10,10 +10,13 @@ import {
 type Props = {
   sessionsOpen: boolean;
   eventsOpen: boolean;
+  onToggleSessions: () => void;
+  onToggleEvents: () => void;
   sessions: ReactNode;
   graph: ReactNode;
   events: ReactNode;
   flowNav: ReactNode;
+  sessionTabs?: ReactNode;
 };
 
 const SESSIONS_WIDTH = 240;
@@ -34,10 +37,13 @@ function readStored(): number {
 export function CanvasShell({
   sessionsOpen,
   eventsOpen,
+  onToggleSessions,
+  onToggleEvents,
   sessions,
   graph,
   events,
   flowNav,
+  sessionTabs,
 }: Props) {
   const [inspectorWidth, setInspectorWidth] = useState(INSPECTOR_DEFAULT);
   const [resizing, setResizing] = useState(false);
@@ -157,10 +163,55 @@ export function CanvasShell({
           minHeight: 0,
           display: "flex",
           flexDirection: "column",
-          padding: eventsOpen ? "10px 12px 24px" : "10px 24px 24px 12px",
+          padding: eventsOpen ? "0 12px 24px" : "0 24px 24px 12px",
         }}
       >
-        <div className="braid-canvas-frame">{graph}</div>
+        {sessionTabs}
+        <div className="braid-canvas-frame" style={{ flex: 1, minHeight: 0 }}>
+          {!sessionsOpen ? (
+            <button
+              type="button"
+              className="braid-icon-btn"
+              onClick={onToggleSessions}
+              aria-label="Open flows sidebar"
+              title="Open flows sidebar"
+              style={{
+                position: "absolute",
+                top: 12,
+                left: 12,
+                zIndex: 10,
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <title>Open left sidebar</title>
+                <rect x="3" y="4" width="18" height="16" rx="2" />
+                <path d="M9 4v16" />
+              </svg>
+            </button>
+          ) : null}
+          {!eventsOpen ? (
+            <button
+              type="button"
+              className="braid-icon-btn"
+              onClick={onToggleEvents}
+              aria-label="Open events sidebar"
+              title="Open events sidebar"
+              style={{
+                position: "absolute",
+                top: 12,
+                right: 12,
+                zIndex: 10,
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <title>Open right sidebar</title>
+                <rect x="3" y="4" width="18" height="16" rx="2" />
+                <path d="M15 4v16" />
+              </svg>
+            </button>
+          ) : null}
+          {graph}
+        </div>
       </main>
 
       {eventsOpen ? (

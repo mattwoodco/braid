@@ -3,8 +3,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
 import { cors } from "@elysiajs/cors";
+import { asc, eq } from "drizzle-orm";
 import { Elysia } from "elysia";
 import { parse as parseYaml } from "yaml";
+import { DB_FILE, db, schema } from "./db";
 
 // web/server/index.ts → braid/ is two dirs up.
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -445,11 +447,15 @@ const app = new Elysia()
     const flow = readFlow(params.flowKey);
     if (!flow) return new Response("flow not found", { status: 404 });
 
-    // Union state.json's session ids with every session Anthropic knows about
-    // for this flow's agents. State.json lags during a live run (it's only
-    // appended at session creation and may not have been flushed yet), so the
-    // API gives us the freshest view.
-    const ids = new Set<string>(flow.sessionIds);
+    // Start from SQLite — these survive even if Anthropic's API forgets the session.
+    const cached = db
+      .select()
+      .from(schema.sessions)
+      .where(eq(schema.sessions.flowKey, params.flowKey))
+      .all();
+    const cachedById = new Map(cached.map((s) => [s.id, s]));
+    const ids = new Set<string>([...cachedById.keys(), ...flow.sessionIds]);
+
     await Promise.all(
       flow.agents
         .filter((a) => a.agentId)
@@ -470,7 +476,41 @@ const app = new Elysia()
     );
 
     const sessions = await Promise.all(
-      Array.from(ids).map((id) => describeSession(id, flow.key)),
+      Array.from(ids).map(async (id) => {
+        const fresh = await describeSession(id, flow.key);
+        // Anthropic may 404 historical sessions; if so, fall back to cache.
+        const cachedRow = cachedById.get(id);
+        const merged: SessionMeta =
+          cachedRow && fresh.label === undefined
+            ? {
+                id,
+                flowKey: cachedRow.flowKey,
+                startedAt: cachedRow.startedAt,
+                status: cachedRow.status as SessionMeta["status"],
+                label: cachedRow.label ?? undefined,
+              }
+            : fresh;
+        // Upsert.
+        db.insert(schema.sessions)
+          .values({
+            id: merged.id,
+            flowKey: merged.flowKey,
+            startedAt: merged.startedAt,
+            status: merged.status,
+            label: merged.label ?? null,
+            lastSyncedAt: Date.now(),
+          })
+          .onConflictDoUpdate({
+            target: schema.sessions.id,
+            set: {
+              status: merged.status,
+              label: merged.label ?? null,
+              lastSyncedAt: Date.now(),
+            },
+          })
+          .run();
+        return merged;
+      }),
     );
     sessions.sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
     return sessions;
@@ -509,16 +549,55 @@ const app = new Elysia()
       /* ignore — treat as historical */
     }
 
+    const persist = (ev: AppEvent) => {
+      db.insert(schema.events)
+        .values({
+          id: ev.id,
+          sessionId: ev.sessionId,
+          flowKey: flowKey ?? null,
+          agentKey: ev.agentKey,
+          ts: ev.ts,
+          type: ev.type,
+          payload: ev.payload,
+        })
+        .onConflictDoNothing()
+        .run();
+    };
+
     const stream = new ReadableStream({
       async start(controller) {
         const enc = new TextEncoder();
         let idx = 0;
+        const sent = new Set<string>();
         const send = (data: unknown) => {
           controller.enqueue(enc.encode(`data: ${JSON.stringify(data)}\n\n`));
         };
+        const sendEvent = (ev: AppEvent) => {
+          if (sent.has(ev.id)) return;
+          sent.add(ev.id);
+          send(ev);
+        };
+
+        // 0. Replay from SQLite first — instant, and survives Anthropic retention.
+        const cached = db
+          .select()
+          .from(schema.events)
+          .where(eq(schema.events.sessionId, sessionId))
+          .orderBy(asc(schema.events.ts))
+          .all();
+        for (const row of cached) {
+          sendEvent({
+            id: row.id,
+            ts: row.ts,
+            sessionId: row.sessionId,
+            agentKey: row.agentKey,
+            type: row.type as AppEventType,
+            payload: row.payload,
+          });
+        }
 
         try {
-          // 1. Historical replay
+          // 1. Historical replay from Anthropic — upsert + forward only new ids.
           // biome-ignore lint/suspicious/noExplicitAny: SDK beta types are partial.
           const page: any = await (anthropic as any).beta.sessions.events.list(
             sessionId,
@@ -526,7 +605,10 @@ const app = new Elysia()
           );
           for await (const ev of page) {
             const mapped = mapEvent(ev, sessionId, idx++);
-            if (mapped) send(mapped);
+            if (mapped) {
+              persist(mapped);
+              sendEvent(mapped);
+            }
           }
 
           // 2. Live tail
@@ -538,7 +620,10 @@ const app = new Elysia()
             );
             for await (const ev of live) {
               const mapped = mapEvent(ev, sessionId, idx++);
-              if (mapped) send(mapped);
+              if (mapped) {
+                persist(mapped);
+                sendEvent(mapped);
+              }
             }
           }
 
@@ -688,4 +773,5 @@ const app = new Elysia()
 
 console.log(`[braid-web] api ready on http://localhost:${PORT}`);
 console.log(`[braid-web] BRAID_DIR=${BRAID_DIR}`);
+console.log(`[braid-web] db=${DB_FILE}`);
 console.log(`[braid-web] flows: ${listFlowKeys().join(", ") || "(none)"}`);

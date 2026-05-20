@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# braid-web persisted event store
+/data
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

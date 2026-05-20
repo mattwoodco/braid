@@ -31,14 +31,25 @@ function fmtSize(n: number | undefined): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const STREAM_OPEN_KEY = "braid-web:stream-open";
+
 export function EventLog({ agent, events, files = [], onOpenFile }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const streamId = useId();
+  const [streamOpen, setStreamOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    return window.localStorage.getItem(STREAM_OPEN_KEY) !== "0";
+  });
+  useEffect(() => {
+    window.localStorage.setItem(STREAM_OPEN_KEY, streamOpen ? "1" : "0");
+  }, [streamOpen]);
 
   useEffect(() => {
+    if (!streamOpen) return;
     const el = ref.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [events]);
+  }, [events, streamOpen]);
 
   return (
     <div
@@ -52,21 +63,74 @@ export function EventLog({ agent, events, files = [], onOpenFile }: Props) {
       }}
     >
       <header style={{ paddingBottom: 8 }}>
-        <div style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-          Events
-        </div>
-        <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>
+        <div
+          style={{
+            fontSize: 18,
+            fontWeight: 600,
+            color: "var(--text)",
+            letterSpacing: "-0.01em",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+          title={agent?.name ?? undefined}
+        >
           {agent?.name ?? "—"}
         </div>
       </header>
       {files.length > 0 ? <FilesStrip files={files} onOpenFile={onOpenFile} /> : null}
+      <button
+        type="button"
+        onClick={() => setStreamOpen((v) => !v)}
+        aria-expanded={streamOpen}
+        aria-controls={streamId}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 6,
+          width: "100%",
+          background: "transparent",
+          padding: 0,
+          marginBottom: streamOpen ? 6 : 0,
+          fontSize: 12,
+          fontWeight: 500,
+          textTransform: "uppercase",
+          letterSpacing: "0.08em",
+          color: "var(--muted)",
+          cursor: "pointer",
+        }}
+      >
+        <span>Stream ({events.length})</span>
+        <svg
+          width="9"
+          height="9"
+          viewBox="0 0 12 12"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{
+            transform: streamOpen ? "rotate(90deg)" : "rotate(0deg)",
+            transition: "transform 0.12s ease",
+            flex: "0 0 auto",
+          }}
+          aria-hidden
+        >
+          <title>toggle</title>
+          <path d="M4 2l4 4-4 4" />
+        </svg>
+      </button>
       <div
         ref={ref}
+        id={streamId}
+        hidden={!streamOpen}
         style={{
-          flex: 1,
+          flex: streamOpen ? 1 : "0 0 auto",
           minHeight: 0,
           overflow: "auto",
-          display: "flex",
+          display: streamOpen ? "flex" : "none",
           flexDirection: "column",
           gap: 8,
           paddingBottom: 16,
@@ -135,7 +199,7 @@ function FilesStrip({
     <section
       aria-label="Session files"
       style={{
-        padding: "8px 4px 12px",
+        padding: "8px 0 12px",
         borderBottom: "1px solid var(--border)",
         marginBottom: 8,
       }}
@@ -148,18 +212,21 @@ function FilesStrip({
         style={{
           display: "flex",
           alignItems: "center",
+          justifyContent: "space-between",
           gap: 6,
           width: "100%",
           background: "transparent",
           padding: 0,
           marginBottom: open ? 6 : 0,
-          fontSize: 10,
+          fontSize: 12,
+          fontWeight: 500,
           textTransform: "uppercase",
           letterSpacing: "0.08em",
           color: "var(--muted)",
           cursor: "pointer",
         }}
       >
+        <span>Files ({files.length})</span>
         <svg
           width="9"
           height="9"
@@ -179,7 +246,6 @@ function FilesStrip({
           <title>toggle</title>
           <path d="M4 2l4 4-4 4" />
         </svg>
-        <span>Files ({files.length})</span>
       </button>
       <div
         id={headingId}

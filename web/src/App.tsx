@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CanvasShell } from "./components/CanvasShell";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { FlowNav } from "./components/FlowNav";
-import { SessionsList } from "./components/SessionsList";
+import { FlowsList } from "./components/FlowsList";
+import { SessionTabs } from "./components/SessionTabs";
 import { AgentGraph } from "./components/AgentGraph";
 import { EventLog } from "./components/EventLog";
 import { Lightbox } from "./components/Lightbox";
@@ -17,21 +18,52 @@ import {
   type SessionFile,
 } from "./data/api";
 import type { Flow, FlowEvent, Session } from "./data/mock";
+import { useUrlState } from "./lib/use-url-state";
 import { deriveAgentStates } from "./state/derive";
 
 function App() {
+  const { get: urlGet, set: urlSet } = useUrlState();
+
   const [flows, setFlows] = useState<Flow[]>([]);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
-  const [selectedFlowKey, setSelectedFlowKey] = useState<string | undefined>(undefined);
-  const [selectedSessionId, setSelectedSessionId] = useState<string | undefined>(undefined);
-  const [selectedAgentKey, setSelectedAgentKey] = useState<string | undefined>(undefined);
   const [sessionsByFlow, setSessionsByFlow] = useState<Record<string, Session[]>>({});
   const [eventsBySession, setEventsBySession] = useState<Record<string, FlowEvent[]>>({});
   const [filesBySession, setFilesBySession] = useState<Record<string, SessionFile[]>>({});
   const [nowTick, setNowTick] = useState<number>(Date.now());
   const [newSessionOpen, setNewSessionOpen] = useState(false);
   const [purgeTarget, setPurgeTarget] = useState<string | undefined>(undefined);
-  const [lightboxFile, setLightboxFile] = useState<SessionFile | null>(null);
+
+  const selectedFlowKey = urlGet("flow");
+  const selectedSessionId = urlGet("session");
+  const selectedAgentKey = urlGet("agent");
+  const lightboxFileId = urlGet("file");
+  const sessionsOpen = urlGet("sessions") !== "0";
+  const eventsOpen = urlGet("events") !== "0";
+
+  const setSelectedFlowKey = useCallback(
+    (key: string | undefined) => urlSet({ flow: key }),
+    [urlSet],
+  );
+  const setSelectedSessionId = useCallback(
+    (id: string | undefined) => urlSet({ session: id }),
+    [urlSet],
+  );
+  const setSelectedAgentKey = useCallback(
+    (key: string | undefined) => urlSet({ agent: key }),
+    [urlSet],
+  );
+  const setLightboxFileId = useCallback(
+    (id: string | undefined) => urlSet({ file: id }),
+    [urlSet],
+  );
+  const toggleSessions = useCallback(
+    () => urlSet({ sessions: sessionsOpen ? "0" : undefined }),
+    [urlSet, sessionsOpen],
+  );
+  const toggleEvents = useCallback(
+    () => urlSet({ events: eventsOpen ? "0" : undefined }),
+    [urlSet, eventsOpen],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -39,7 +71,7 @@ function App() {
       .then((f) => {
         if (cancelled) return;
         setFlows(f);
-        if (f.length > 0) setSelectedFlowKey(f[0].key);
+        if (f.length > 0 && !urlGet("flow")) setSelectedFlowKey(f[0].key);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -71,6 +103,15 @@ function App() {
     () => flows.find((f) => f.key === selectedFlowKey),
     [flows, selectedFlowKey],
   );
+
+  // If the URL points at a flow that doesn't exist, go back to home
+  // (clear flow + dependent params) so the default-flow effect can pick.
+  useEffect(() => {
+    if (!selectedFlowKey || flows.length === 0) return;
+    if (!flows.some((f) => f.key === selectedFlowKey)) {
+      urlSet({ flow: undefined, agent: undefined, session: undefined, file: undefined });
+    }
+  }, [flows, selectedFlowKey, urlSet]);
   const director = useMemo(
     () => flow?.agents.find((a) => a.isDirector) ?? flow?.agents[0],
     [flow],
@@ -194,10 +235,12 @@ function App() {
     [sessionEvents, effectiveAgentKey],
   );
 
-  const handleSelectFlow = useCallback((key: string) => {
-    setSelectedFlowKey(key);
-    setSelectedAgentKey(undefined);
-  }, []);
+  const handleSelectFlow = useCallback(
+    (key: string) => {
+      urlSet({ flow: key, agent: undefined, session: undefined, file: undefined });
+    },
+    [urlSet],
+  );
 
   const handleStartSession = useCallback(
     async (brief: string) => {
@@ -253,6 +296,11 @@ function App() {
     return [...anthropicFiles, ...externals];
   }, [selectedSessionId, filesBySession, eventsBySession]);
 
+  const lightboxFile = useMemo(
+    () => (lightboxFileId ? (selectedFiles.find((f) => f.id === lightboxFileId) ?? null) : null),
+    [lightboxFileId, selectedFiles],
+  );
+
   const purgeFlowObj = purgeTarget ? flows.find((f) => f.key === purgeTarget) : undefined;
 
   if (loadError) {
@@ -278,22 +326,32 @@ function App() {
   return (
     <>
       <CanvasShell
-        sessionsOpen
-        eventsOpen
+        sessionsOpen={sessionsOpen}
+        eventsOpen={eventsOpen}
+        onToggleSessions={toggleSessions}
+        onToggleEvents={toggleEvents}
         flowNav={
           <FlowNav
-            flows={flows}
-            selectedFlowKey={flow.key}
-            onSelectFlow={handleSelectFlow}
-            onPurgeFlow={(key) => setPurgeTarget(key)}
+            sessionsOpen={sessionsOpen}
+            eventsOpen={eventsOpen}
+            onToggleSessions={toggleSessions}
+            onToggleEvents={toggleEvents}
           />
         }
         sessions={
-          <SessionsList
+          <FlowsList
+            flows={flows}
+            selectedFlowKey={flow.key}
+            onSelect={handleSelectFlow}
+            onPurge={(key) => setPurgeTarget(key)}
+          />
+        }
+        sessionTabs={
+          <SessionTabs
             sessions={flowSessions}
             selectedSessionId={selectedSessionId}
             onSelect={setSelectedSessionId}
-            onRun={() => setNewSessionOpen(true)}
+            onNew={() => setNewSessionOpen(true)}
           />
         }
         graph={
@@ -309,7 +367,7 @@ function App() {
             agent={selectedAgent}
             events={agentEvents}
             files={selectedFiles}
-            onOpenFile={setLightboxFile}
+            onOpenFile={(f) => setLightboxFileId(f.id)}
           />
         }
       />
@@ -319,7 +377,7 @@ function App() {
         onClose={() => setNewSessionOpen(false)}
         onSubmit={handleStartSession}
       />
-      <Lightbox file={lightboxFile} onClose={() => setLightboxFile(null)} />
+      <Lightbox file={lightboxFile} onClose={() => setLightboxFileId(undefined)} />
       <ConfirmDialog
         open={Boolean(purgeTarget)}
         title={`Purge ${purgeFlowObj?.name ?? purgeTarget}?`}

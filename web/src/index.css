@@ -20,8 +20,8 @@
   --row-hover: #1c1c1c;
   --canvas-bg: rgba(18, 18, 18, 0.72);
   --paper-shadow: 0 8px 24px rgba(0, 0, 0, 0.15), 0 2px 6px rgba(0, 0, 0, 0.1);
-  --flow-edge: #5eead4;
-  --flow-edge-selected: #f5e6c8;
+  --flow-edge: #555555;
+  --flow-edge-selected: #c09e5a;
   --spinner-track: #333;
   --node-card: #1a1a1a;
   --node-card-selected: rgba(245, 230, 200, 0.09);
@@ -59,8 +59,8 @@
   --row-hover: #d8d8d0;
   --canvas-bg: rgba(244, 244, 240, 0.72);
   --paper-shadow: 0 4px 12px rgba(0, 0, 0, 0.04), 0 1px 4px rgba(0, 0, 0, 0.03);
-  --flow-edge: #0d9f8e;
-  --flow-edge-selected: #6b5b2a;
+  --flow-edge: #a8a8a0;
+  --flow-edge-selected: #c09e5a;
   --spinner-track: #b8b8b0;
   --node-card: #fff;
   --node-card-selected: rgba(100, 80, 20, 0.1);
@@ -262,24 +262,87 @@ textarea {
   outline: none;
 }
 .braid-flow-canvas .react-flow__controls {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: var(--paper-shadow);
-  overflow: hidden;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
 }
 .braid-flow-canvas .react-flow__controls-button {
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
-  color: var(--text);
+  background: transparent;
+  border: none;
+  color: var(--muted);
   width: 28px;
   height: 28px;
+  border-radius: 6px;
 }
 .braid-flow-canvas .react-flow__controls-button:hover {
-  background: var(--btn-surface-hover);
+  background: var(--btn-ghost-hover);
+  color: var(--text);
 }
 .braid-flow-canvas .react-flow__controls-button svg {
   fill: currentColor;
+}
+
+.braid-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  font-size: 14px;
+  min-width: 0;
+}
+.braid-header__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  flex-shrink: 0;
+}
+.braid-header__brand-text {
+  font-size: 22px;
+  color: #c09e5a;
+}
+.braid-header__tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  scrollbar-width: none;
+}
+.braid-header__tabs::-webkit-scrollbar {
+  display: none;
+}
+.braid-header__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+  .braid-header {
+    gap: 6px;
+  }
+  .braid-header__brand-text {
+    font-size: 18px;
+  }
+}
+
+.braid-flow-row__purge {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.braid-flow-row:hover .braid-flow-row__purge,
+.braid-flow-row__purge:focus-visible {
+  opacity: 0.55;
+}
+.braid-flow-row:hover .braid-flow-row__purge:hover {
+  opacity: 1;
 }
 
 .braid-canvas-frame {
@@ -291,4 +354,73 @@ textarea {
   overflow: hidden;
   box-shadow: var(--paper-shadow);
   border: 1px solid var(--border);
+}
+
+.braid-sheet-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding-top: 0;
+  padding-bottom: 0;
+  min-width: 0;
+}
+.braid-sheet-tabs__new {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 36px;
+  flex-shrink: 0;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.braid-sheet-tabs__new:hover {
+  background: var(--btn-surface-hover);
+  color: var(--text);
+}
+.braid-sheet-tabs__scroll {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  overflow-x: auto;
+  flex: 1;
+  min-width: 0;
+  scrollbar-width: none;
+}
+.braid-sheet-tabs__scroll::-webkit-scrollbar {
+  display: none;
+}
+.braid-sheet-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px;
+  height: 36px;
+  max-width: 220px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 16px 16px 0 0;
+  border: 1px solid transparent;
+  border-bottom: none;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.braid-sheet-tab:hover {
+  background: var(--btn-surface-hover);
+  color: var(--text);
+}
+.braid-sheet-tab--active {
+  background: var(--canvas-bg);
+  color: var(--text);
+  border-color: var(--border);
+  font-weight: 500;
+}
+.braid-sheet-tab__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
