@@ -1,0 +1,68 @@
+# yaml-language-server: $schema=../../.claude/skills/braid/flow.schema.json
+name: ad-render-v2
+env_name: braid-ad-render-v2
+state_file: state.json
+output_dir: outputs/ad-render-v2
+brief_default: |
+  https://rivian.com/r2
+
+# rationale: in-session Playwright. Scout must reach arbitrary product URLs;
+# Chromium must fetch CDN-hosted product images during render. Director
+# rejects briefs that don't contain a valid http(s) URL.
+environment:
+  networking:
+    type: unrestricted
+  # Pre-installed and cached at the environment level (per Anthropic
+  # environments docs: packages are installed by their package managers and
+  # cached across sessions that share the same environment). The agent uses
+  # `executablePath: '/usr/bin/chromium'` so it never has to download a
+  # browser binary at runtime.
+  packages:
+    # apt: [chromium] is misleading on Anthropic's cloud container — it
+    # installs a snap stub that can't launch inside Docker. The npm
+    # playwright postinstall pulls its own pinned Chromium into
+    # /opt/pw-browsers/, which is what the designer agent actually uses.
+    npm:
+      - playwright
+
+memory_stores:
+  - key: scoutStore
+    name: ad-render-v2-scout
+    access: read_write
+    instructions: |
+      Product facts per URL, namespaced under /products/<slug>/.
+      Files: facts.json, images.json, logo.json, fonts.json.
+  - key: designerStore
+    name: ad-render-v2-designer
+    access: read_write
+    instructions: |
+      Rendered ad HTML + validation per product, /products/<slug>/.
+
+agents:
+  - key: scout
+    file: agents/scout.yaml
+  - key: designer
+    file: agents/designer.yaml
+  - key: director
+    file: agents/director.yaml
+    is_director: true
+    coordinator: [scout, designer]
+
+run:
+  attach_stores: true
+  stall_ms: 360000
+  max_restarts: 1
+  log_runs: true
+  outcome:
+    description: |
+      Either (a) no URL → director replied "no URL provided — nothing to do"
+      and outputs is empty; or (b) /mnt/session/outputs/ contains:
+        - manifest.json with product, hero_image_url, brand summary, and ads array
+        - static-ad-1.html + static-ad-1.png (1080×1080 square)
+        - static-ad-2.html + static-ad-2.png (1080×1350 portrait)
+        - validation.json with pass:true for both ads
+        - playwright-env.json with the sandbox's chromium version stamp
+      No host post-hook is required — rendering and validation happen inside
+      the session via Playwright in the managed-agent sandbox.
+    rubric_file: rubric.md
+    max_iterations: 2

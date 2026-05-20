@@ -1,0 +1,20 @@
+{
+  "brand_name": "North Notch",
+  "product": "indie hiking boots, made in small Vermont batches",
+  "duration_sec": 60,
+  "shot_count": 5,
+  "tone": "earnest, slightly off-kilter, documentary — never cynical, never bro-y, never \"crushing it\"",
+  "target_audience": "weekend hikers in their 30s-40s who treat their gear like heirlooms, not status objects",
+  "brand_style": "16mm film, naturalistic light, hands-and-laces close-ups. Pacific Northwest / Northeast hardwoods, fog, wet stone. Muted forest palette with one warm leather highlight. Documentary stillness — NOT triumphant orchestral, NOT slow-motion hero shots, NOT mountain-vista wide-angles. Real feet, real mud, real wear. 16:9.",
+  "banned_terms": [
+    "crushing it",
+    "epic",
+    "adventure-grade",
+    "engineered for",
+    "performance",
+    "rugged",
+    "unleash",
+    "conquer",
+    "no limits"
+  ]
+}

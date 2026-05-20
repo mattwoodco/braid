@@ -1,0 +1,15 @@
+# gauntlet-ads flow rubric
+
+## Critical — FAIL if any fail
+1. `/mnt/session/outputs/manifest.json` exists and is valid JSON
+2. `manifest.product_slug` equals "gauntlet"
+3. `manifest.ads` is an array; length equals the number of requested ad sizes
+4. Each entry has `size`, `html_path`, `png_path` pointing at existing files
+5. Each PNG has dimensions exactly matching its declared `size`
+6. `colors.css` and `typography.css` exist under outputs
+7. `validation.json` reports pass equal to len(ads), fail:0, broken_images:[]
+
+## Quality — flag but do not fail
+8. Headlines on each ad are distinct (no duplicated lede across sizes)
+9. Hero image bleeds correctly without obvious crop artifacts at edge sizes (1080×566 wide, 1080×1920 story)
+10. CTA text is consistent across all sizes

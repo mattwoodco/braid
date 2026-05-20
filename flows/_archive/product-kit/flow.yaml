@@ -1,0 +1,76 @@
+# yaml-language-server: $schema=../../.claude/skills/braid/flow.schema.json
+name: product-kit
+env_name: braid-product-kit
+state_file: state.json
+output_dir: outputs/product-kit
+brief_default: |
+  https://milkmakeup.com/products/hydro-grip-gel-tint-hydrating-skin-tint?variant=44731334131897
+
+# rationale: user supplies an arbitrary product URL, so scout must reach any
+# host on the public web. The director rejects briefs that don't contain a
+# valid http(s) URL, which bounds the surface to one explicit user input per
+# session. Slice-follow-up: scope to the resolved host after URL parse.
+environment:
+  networking:
+    type: unrestricted
+
+memory_stores:
+  - key: scoutStore
+    name: product-kit-scout
+    access: read_write
+    instructions: |
+      Product facts extracted from URLs. Namespace every write under
+      /products/<slug>/ where <slug> is the kebab-cased product name
+      from the URL. Files: facts.json, images.json, logo.json, fonts.json,
+      raw.html. Read first — if /products/<slug>/facts.json exists, reuse it.
+  - key: stylistStore
+    name: product-kit-stylist
+    access: read_write
+    instructions: |
+      Brand aesthetic derived from scout output. Namespace under
+      /products/<slug>/. Files: brand-summary.md, colors.css,
+      typography.css, aesthetic.md. Read first; reuse if present.
+  - key: copyStore
+    name: product-kit-copy
+    access: read_write
+    instructions: |
+      Ad copy variants per product. Namespace under /products/<slug>/.
+      Files: headlines.md, primary-copy.md, ctas.md.
+  - key: designerStore
+    name: product-kit-designer
+    access: read_write
+    instructions: |
+      Rendered ad HTML/CSS per product. Namespace under /products/<slug>/.
+      Files: static-ad-1.html, static-ad-2.html, static-ad-3.html,
+      story-ad-1.html, story-ad-2.html, story-ad-3.html, hero-section.html,
+      hero-section.css.
+
+agents:
+  - key: scout
+    file: agents/scout.yaml
+  - key: stylist
+    file: agents/stylist.yaml
+  - key: copywriter
+    file: agents/copywriter.yaml
+  - key: designer
+    file: agents/designer.yaml
+  - key: director
+    file: agents/director.yaml
+    is_director: true
+    coordinator: [scout, stylist, copywriter, designer]
+
+run:
+  attach_stores: true
+  stall_ms: 240000
+  max_restarts: 1
+  log_runs: true
+  outcome:
+    description: |
+      Either:
+        (a) The brief contained no http(s) URL and the director replied with
+            EXACTLY "no URL provided — nothing to do" and produced no outputs; or
+        (b) /mnt/session/outputs/manifest.json exists with non-empty
+            product, brand, copy, and ads sections, and the referenced
+            files exist on disk under /mnt/session/outputs/{brand,assets,copy,ads,landing}/.
+    rubric_file: rubric.md
+    max_iterations: 1

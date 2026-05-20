@@ -1,0 +1,15 @@
+{
+  "cause_title": "Adopt an Acre",
+  "subtitle": "A quiet-rebellion fundraiser to protect Pacific Northwest scrubland from clearcut.",
+  "brief": "Build a one-page site for \"Adopt an Acre\" — a quiet-rebellion fundraiser to protect Pacific Northwest scrubland from clearcut.\n\nThe page features THREE looping hero videos in sequence (a 3-shot arc: weathered hands on a sapling → wide lone figure in a cleared field with bulldozer tracks → first leaf catching wind at dawn) and a prominent \"Adopt an Acre\" button linking to https://example.com/donate.",
+  "shot_count": 3,
+  "visual_bible": "Pacific Northwest scrubland, overcast cool-gray skies with occasional shafts of weak sun. Mist clinging to low ground. Moss, bracken, second-growth fir at the edges, but in the foreground: raw cleared earth with bulldozer track ruts and a single sapling. Shot on 35mm film, naturalistic light, no color grading toward heroism. Documentary stillness — NOT activist-anthem, NOT mournful-orchestral. Damp earth tones, mossy greens, a single warm note (skin, leaf-edge) against the gray. 16:9.",
+  "shots": [
+    "HOOK: Weathered hands cradling a small sapling, fingers pressing soil around its roots, breath visible in cold air.",
+    "ESCALATION: Wide on a lone figure standing in a cleared field, bulldozer tracks crisscrossing the foreground, distant treeline cut sharply against the gray sky.",
+    "PAYOFF: Close on a single new leaf at dawn catching the first thin wind, a warm edge of sun barely lighting it from behind."
+  ],
+  "cta_text": "Adopt an Acre",
+  "cta_href": "https://example.com/donate",
+  "palette_hint": "damp earth tones and mossy greens with a single warm-amber accent"
+}

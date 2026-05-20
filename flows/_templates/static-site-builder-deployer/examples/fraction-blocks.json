@@ -1,0 +1,13 @@
+{
+  "site_title": "Fraction Blocks",
+  "brief": "Build a single-page kids' learning site that teaches fractions using interactive draggable blocks. The page should let a child split a whole into halves, thirds, fourths, sixths, and eighths and see the equivalent fraction labeled as they drag.\n\nKeep it warm and inviting. No login, no tracking, no external dependencies beyond the chosen font.",
+  "design_system": "warm cream background (#FDF8F0), deep teal accents, rounded sans-serif headers (Fraunces or Recoleta if available), generous touch targets (min 60px), no harsh shadows, no busy textures. Optimized for tablet and desktop. Mobile-friendly but not the primary target.",
+  "required_elements": [
+    "Hero headline explaining what the page teaches in one sentence",
+    "Interactive draggable block area (HTML5 + vanilla JS, no React)",
+    "Live fraction label that updates as the child drags",
+    "Five preset fraction modes: 1/2, 1/3, 1/4, 1/6, 1/8",
+    "Footer with 'made for kids' note"
+  ],
+  "tier": "execute"
+}

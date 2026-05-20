@@ -69,11 +69,29 @@
         }
       ]
     },
+    "packages": {
+      "description": "Packages pre-installed in the container, cached across sessions sharing the env. Authority: https://platform.claude.com/docs/en/managed-agents/environments",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "apt":   { "type": "array", "items": { "type": "string" } },
+        "cargo": { "type": "array", "items": { "type": "string" } },
+        "gem":   { "type": "array", "items": { "type": "string" } },
+        "go":    { "type": "array", "items": { "type": "string" } },
+        "npm":   { "type": "array", "items": { "type": "string" } },
+        "pip":   { "type": "array", "items": { "type": "string" } }
+      }
+    },
     "environment": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "networking": { "$ref": "#/definitions/networking" }
+        "networking": { "$ref": "#/definitions/networking" },
+        "packages": { "$ref": "#/definitions/packages" },
+        "warm": {
+          "type": "boolean",
+          "description": "When true (default if packages declared), setup spawns a one-shot session after env creation that invokes each declared package so apt/npm/pip caches materialize. Subsequent sessions sharing the env reuse the cache. Set false to skip and pay the install cost on first run."
+        }
       }
     },
     "agent": {

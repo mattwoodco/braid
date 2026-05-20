@@ -1,0 +1,58 @@
+# yaml-language-server: $schema=../../.claude/skills/braid/flow.schema.json
+# Generated from flows/_templates/url-to-ad-set/. Re-generate via
+#   braid create --template url-to-ad-set --name {{flow_name}} --vars <path>
+name: {{flow_name}}
+env_name: braid-{{flow_name}}
+state_file: state.json
+output_dir: outputs/{{flow_name}}
+brief_default: |
+  {{source_url}}
+
+# rationale: scout fetches the source URL; designer threads pre-download
+# CDN-hosted assets with curl so the in-sandbox Chromium can render them
+# via page.route() (Chromium cannot resolve external HTTPS certs inside
+# the sandbox — ERR_CERT_AUTHORITY_INVALID).
+environment:
+  networking:
+    type: unrestricted
+
+memory_stores:
+  - key: scoutStore
+    name: {{flow_name}}-scout
+    access: read_write
+    instructions: |
+      Per-product facts under /products/<slug>/. Files: facts.json,
+      images.json, logo.json, fonts.json. The director reads scoutStore
+      before delegating to designer threads so they don't re-fetch.
+  - key: designerStore
+    name: {{flow_name}}-designer
+    access: read_write
+    instructions: |
+      Brand tokens + per-size ad HTML + validation under /products/<slug>/.
+
+agents:
+  - key: scout
+    file: agents/scout.yaml
+  - key: designer
+    file: agents/designer.yaml
+  - key: director
+    file: agents/director.yaml
+    is_director: true
+    # Managed Agents coordinator: director may spawn multiple `designer`
+    # threads concurrently (one per ad size). Scout runs once.
+    coordinator: [scout, designer]
+
+run:
+  attach_stores: true
+  stall_ms: 360000
+  max_restarts: 1
+  log_runs: true
+  outcome:
+    description: |
+      /mnt/session/outputs/ contains:
+        - manifest.json with product slug "{{product_slug}}", hero_image_url, and an "ads" array of length matching ad_sizes
+        - colors.css, typography.css derived from the source brand
+        - one ad-N.html + ad-N.png pair per requested size
+        - validation.json with pass equal to len(ad_sizes), fail:0, broken_images:[]
+    rubric_file: rubric.md
+    max_iterations: 2

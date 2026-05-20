@@ -1,0 +1,31 @@
+name: static-site-builder-deployer
+description: |
+  Single builder agent that writes one static HTML site to
+  /mnt/session/outputs/site/, then the host post-session hook deploys to
+  Vercel using $VERCEL_TOKEN. The token never enters the agent transcript
+  or sandbox.
+
+  Uses Managed Agents primitives:
+    - single-agent session (no coordinator overhead)
+    - prompt caching: locked design system / hard rules in system_stable
+    - outcome + rubric: iterate until index.html validates
+    - post-session hook: out-of-session Vercel deploy (NIST SP 800-204C
+      build/deploy separation, CVE-2026-44479 — no token in CLI args)
+    - {{file:...}} brief substitutions for reference design files
+
+  Use this for any one-page site where the brief is rich enough that you
+  don't need a coordinator/fanout — kids' learning pages, Three.js demos,
+  portfolio pages, docs sites, marketing one-pagers.
+
+parameters:
+  - { key: flow_name,      type: string, required: true, pattern: "^[a-z][a-z0-9-]*$" }
+  - { key: site_title,     type: string, required: true, description: "Title shown in <title> and header" }
+  - { key: brief,          type: string, required: true, multiline: true, description: "What to build. Use {{file:design/foo.html}} to inline reference files." }
+  - { key: design_system,  type: string, required: false, default: "warm cream/off-white background, serif display type, restrained palette, generous whitespace", multiline: true }
+  - { key: required_elements, type: "string[]", required: false, description: "Must-have elements (e.g. [\"hero section\", \"3 feature cards\", \"footer with email signup\"])" }
+  - { key: vercel_project, type: string, required: false, default: "{{flow_name}}-site" }
+  - { key: tier,           type: string, required: false, default: "execute", enum: ["execute", "reason", "orchestrate"], description: "Use orchestrate only when the build genuinely needs deep design judgment" }
+
+defaults:
+  agents:
+    builder: { tier: execute }

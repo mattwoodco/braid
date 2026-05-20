@@ -1,9 +1,15 @@
 {
 	"name": "braid",
 	"type": "module",
+	"scripts": {
+		"web": "cd web && bun run dev",
+		"web:install": "cd web && bun install",
+		"web:build": "cd web && bun run build"
+	},
 	"dependencies": {
 		"@anthropic-ai/sdk": "0.96.0",
 		"elysia": "1.4.28",
+		"playwright": "^1.60.0",
 		"yaml": "2.9.0"
 	}
 }

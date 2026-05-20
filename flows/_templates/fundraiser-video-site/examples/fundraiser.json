@@ -1,0 +1,13 @@
+{
+  "cause_title": "Save the Community Centre",
+  "subtitle": "Help renovate the community hall — keep film nights, bingo, and senior socials alive.",
+  "brief": "Build a one-page fundraiser site for \"Save the Community Centre\" — a charming fundraiser to renovate a dated community hall used for film nights, bingo, and senior socials.\n\nThe page features a short looping hero video (warm, nostalgic, documentary feel — elderly folks gathered around a film projector in the hall) and a prominent \"Donate Now\" button linking to https://example.com/donate.",
+  "shot_count": 1,
+  "visual_bible": "Shot on 16mm film. Warm documentary grade with gentle grain. Honey-toned wood-panelled community hall, soft overhead lighting, elderly people in cardigans gathered warmly around a vintage film projector or a folding table covered in 35mm film strips. Muted earth tones. Shallow depth of field. Played completely straight — nostalgic, warm, hopeful, NOT comedic. 16:9.",
+  "shots": [
+    "Hero shot: elderly folks gathered warmly around a vintage film projector, soft overhead lighting catching dust motes, hands resting on the projector handle. Slight motion implied — gentle camera push, ambient warmth."
+  ],
+  "cta_text": "Donate Now",
+  "cta_href": "https://example.com/donate",
+  "palette_hint": "warm honey/cream with deep burgundy accents"
+}

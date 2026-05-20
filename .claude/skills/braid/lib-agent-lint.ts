@@ -53,7 +53,11 @@ const RULES: Array<{
   },
   {
     id: "no-http-url",
-    re: /\bhttp:\/\/[^\s'"]+/,
+    // Allow loopback (http://localhost, http://127.0.0.1) — these are used by
+    // browser-automation agents to serve local artifacts back to themselves and
+    // never touch the MCP host allowlist. Reject only plain http:// to public
+    // hosts, which the MCP allowlist would refuse anyway (Slice 10 F5).
+    re: /\bhttp:\/\/(?!localhost(?:[:\/]|$)|127\.0\.0\.1(?:[:\/]|$))[^\s'"]+/,
     why: "Plain http:// is rejected by the MCP host allowlist (Slice 10 F5). Use https only.",
   },
 ];

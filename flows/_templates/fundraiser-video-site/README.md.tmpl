@@ -1,0 +1,21 @@
+# {{flow_name}}
+
+Generated from `flows/_templates/fundraiser-video-site/`. To re-generate:
+
+```bash
+bun .claude/skills/braid/braid.ts create \
+  --template fundraiser-video-site \
+  --name {{flow_name}} \
+  --vars flows/_templates/fundraiser-video-site/examples/{{flow_name}}.json \
+  --force
+```
+
+To set up Anthropic resources and run:
+
+```bash
+bun .claude/skills/braid/braid.ts setup {{flow_name}}
+bun .claude/skills/braid/braid.ts run   {{flow_name}}
+```
+
+The host post-session hook deploys to Vercel using `$VERCEL_TOKEN` on the host;
+the token never enters the agent session.

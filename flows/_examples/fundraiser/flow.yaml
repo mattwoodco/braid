@@ -1,0 +1,59 @@
+# yaml-language-server: $schema=../../.claude/skills/braid/flow.schema.json
+# Generated from flows/_templates/fundraiser-video-site/. Edit the template,
+# not this file — regenerate via `braid create --template fundraiser-video-site`.
+name: fundraiser
+brief_default: |
+  Build a one-page fundraiser site for "Save the Community Centre" — a charming fundraiser to renovate a dated community hall used for film nights, bingo, and senior socials.
+
+  The page features a short looping hero video (warm, nostalgic, documentary feel — elderly folks gathered around a film projector in the hall) and a prominent "Donate Now" button linking to https://example.com/donate.
+
+# rationale: showcase — agent fetches Fal-generated media via curl from the
+# sandbox. The Vercel deploy is performed OUT-OF-SESSION by the host
+# post_session_hook below, so the token never enters the agent transcript or
+# sandbox (per NIST SP 800-204C build/deploy separation, OWASP Secrets
+# Management Cheat Sheet, and CVE-2026-44479).
+environment:
+  networking:
+    type: unrestricted
+
+vaults:
+  - display_name: fal
+    credential:
+      display_name: Fal MCP
+      mcp_server_url: https://mcp.fal.ai/mcp
+      token_env: FAL_API_KEY
+
+agents:
+  - key: videographer
+    file: agents/videographer.yaml
+    mcp_servers:
+      - type: url
+        url: https://mcp.fal.ai/mcp
+        name: fal
+    tools:
+      - type: agent_toolset_20260401
+        default_config: { enabled: true }
+      - type: mcp_toolset
+        mcp_server_name: fal
+        default_config:
+          enabled: true
+          permission_policy: { type: always_allow }
+  - key: web_builder
+    file: agents/web-builder.yaml
+  - key: director
+    file: agents/director.yaml
+    is_director: true
+    coordinator: [videographer, web_builder]
+
+run:
+  attach_vault: true
+  stall_ms: 240000
+  max_restarts: 1
+  outcome:
+    description: "Manifest at /mnt/session/outputs/manifest.json with 1 reachable video_url(s) in `shots[].video_url`, ready_to_deploy:true, and site_dir pointing at a folder containing index.html with 1 <video> element(s) and a 'Donate Now' button."
+    rubric_file: rubric.md
+    max_iterations: 1
+  post_session_hook:
+    command: bun run "$BRAID_REPO_ROOT/.claude/skills/braid/post-hooks/vercel-deploy.ts"
+    env_passthrough: [VERCEL_TOKEN]
+    timeout_ms: 300000

@@ -28,15 +28,19 @@ const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..");
 const BRAID_ENTRY = join(REPO_ROOT, ".claude", "skills", "braid", "braid.ts");
 const SKILL_DIR = join(REPO_ROOT, ".claude", "skills", "braid");
 
+// Flow ids use the namespaced form post-archive: top-level flows still live
+// at flows/<name>/, archived reference flows at flows/_archive/<name>/, and
+// the showcase/example flows at flows/_examples/<name>/. The braid CLI's
+// flowPath() resolves `_archive/foo` → flows/_archive/foo/flow.yaml.
 const SHIPPED_FLOWS = [
-  "ad",
-  "final-inning",
-  "fundraiser",
-  "homecoming",
-  "pop-quiz",
-  "quiet-rebellion",
-  "snapshots",
-  "solids",
+  "_archive/ad",
+  "_archive/final-inning",
+  "_examples/fundraiser",
+  "_archive/homecoming",
+  "_archive/pop-quiz",
+  "_archive/quiet-rebellion",
+  "_examples/snapshots",
+  "_archive/solids",
 ];
 
 function runDemo(flow: string): { exitCode: number; stdout: string; stderr: string } {
@@ -143,18 +147,18 @@ describe("Feature: Braid orchestrator end-to-end", () => {
 
   describe("Scenario: Given snapshots has run.reflection configured, when the demo session ends idle, then [reflection.ok] fires with a stored path", () => {
     test("Given snapshots config and BRAID_DEMO_MODE=1, when demo runs, then reflection.ok emits with reflections/ path", () => {
-      const r = runDemo("snapshots");
+      const r = runDemo("_examples/snapshots");
       expect(r.exitCode).toBe(0);
       expect(r.stdout).toMatch(/\[reflection\.gate\]/);
       expect(r.stdout).toMatch(/"fire":true/);
       expect(r.stdout).toMatch(/\[reflection\.ok\]/);
-      expect(r.stdout).toMatch(/storedPath":"reflections\//);
+      expect(r.stdout).toMatch(/storedPath":"\/reflections\//);
     }, 20_000);
   });
 
   describe("Scenario: Given a Vercel-CLI flow has run.post_session_hook configured, when the demo session ends, then the hook is invoked AFTER session deliverables exist", () => {
     test("Given fundraiser config, when demo runs, then [post_hook] event appears AFTER [saved]/[done] events for outputs", () => {
-      const r = runDemo("fundraiser");
+      const r = runDemo("_examples/fundraiser");
       expect(r.exitCode).toBe(0);
       // Slice 10 F2 ordering: download → run-log → reflection → hook → done
       const doneIdx = r.stdout.indexOf("[done]");
@@ -333,7 +337,7 @@ describe("Feature: Braid orchestrator end-to-end", () => {
 
   describe("Scenario: As a security reviewer, given BRAID_DEMO_MODE=1, when any flow runs, then no real API key is ever consulted (sentinel substitution)", () => {
     test("Given empty Anthropic/Fal/Vercel envs, when demo runs, then it still succeeds (mock client + sentinel injection)", () => {
-      const r = runDemo("ad");
+      const r = runDemo("_archive/ad");
       expect(r.exitCode).toBe(0);
       // The sentinel token shouldn't surface in stdout for the demo path,
       // but the demo banner explicitly says "no real API calls".

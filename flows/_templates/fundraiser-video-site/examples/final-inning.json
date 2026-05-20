@@ -1,0 +1,15 @@
+{
+  "cause_title": "Save the Field",
+  "subtitle": "Help save a small-town little league diamond from demolition.",
+  "brief": "Build a one-page site for \"Save the Field\" — a fundraiser to save a small-town little league diamond from demolition.\n\nThe page features THREE looping hero videos in sequence (a 3-shot arc: cleat sliding into infield dust → catcher's-mask POV of parents in folding chairs under stadium lights → empty diamond as light banks cut off one by one) and a prominent \"Save the Field\" button linking to https://example.com/donate.",
+  "shot_count": 3,
+  "visual_bible": "Small-town Americana, late dusk into night. Faded chalk lines, hand-painted outfield ads, weathered wooden bleachers, sodium-vapor stadium lights that buzz audibly. Shot on 16mm with halation around the lights. Documentary realism — NOT cinematic-uplift, NOT slow-mo triumph. Worn leather, scuffed cleats, real sweat. Earthy umbers and faded reds against the harsh light cones. 16:9.",
+  "shots": [
+    "HOOK: Tight low angle on a cleat sliding into infield dust, plume of red clay catching the stadium lights, chalk line scuffed.",
+    "ESCALATION: Catcher's-mask POV looking out: parents in folding chairs under buzzing stadium lights, kid mid-swing in foreground frame.",
+    "PAYOFF: Wide on an empty diamond. The light banks cut off one by one, plunging the field into deeper twilight, dust still hanging in the air."
+  ],
+  "cta_text": "Save the Field",
+  "cta_href": "https://example.com/donate",
+  "palette_hint": "earthy umber and faded red clay with sodium-vapor amber accents"
+}

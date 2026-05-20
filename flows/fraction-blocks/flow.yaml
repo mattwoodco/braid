@@ -1,0 +1,79 @@
+# yaml-language-server: $schema=../../.claude/skills/braid/flow.schema.json
+name: fraction-blocks
+brief_default: |
+  Build a single-page PLAYFUL INTERACTIVE WEBSITE that teaches kids (ages 5-9)
+  fractions through Duplo-style blocks. The aesthetic is:
+    - HUGE rounded sans-serif type (Fredoka or Baloo 2 from Google Fonts)
+    - Bright, saturated primary colors (Duplo red, blue, yellow, green, orange)
+    - Soft pastel background, NO borders anywhere — depth comes from drop-shadows
+    - Chunky rounded corners (border-radius 24-48px), tactile feel
+    - Big tap targets, no fine details, no thin lines
+
+  The page must include AT LEAST THREE interactive learning activities:
+
+  1. SLICE-THE-BLOCK
+     A large Duplo-style block divided into N equal segments. Kid clicks segments
+     to "color them in". A fraction display (e.g. "3/4") updates live as they
+     click. Includes a +/- control to change the denominator (2 through 8).
+
+  2. MATCH-THE-FRACTION
+     Show a fraction like "1/2" in giant type. Below, show 3-4 candidate blocks
+     with different shaded portions. Kid taps the correct one. On correct: a
+     happy chime (Web Audio API, just an oscillator — no external audio files)
+     and a confetti burst (CSS/JS, no libraries). On wrong: gentle wobble shake.
+     Auto-advance to a new question after a correct answer. Track a score.
+
+  3. BUILD-THE-WHOLE
+     A row of empty slots representing "1 whole". A palette of fraction pieces
+     (halves, thirds, quarters) the kid can click to add into the row. The row
+     fills up; when it equals exactly 1 whole, celebrate with confetti.
+
+  Everything must be KEYBOARD ACCESSIBLE (tab + enter/space) AND touch-friendly.
+  Use semantic HTML, aria-labels on all interactive elements, and a high-contrast
+  focus ring. Add a short "How to play" intro at the top and a footer with the
+  three activity anchors.
+
+  Deliverables (all FLAT under /mnt/session/outputs/, NOT in a subdirectory —
+  the host file-sync flattens nested paths):
+    - index.html        single self-contained file (CSS + JS inline, no build)
+    - README.md         one paragraph describing the activities
+
+  Also write /mnt/session/outputs/manifest.json:
+    { "site_dir": ".",
+      "project_name": "fraction-blocks",
+      "ready_to_deploy": true }
+
+  Do NOT install or run the Vercel CLI. Do NOT accept any deploy token from this
+  brief. The host runs the Vercel deploy AFTER this session ends, using the
+  manifest you write.
+
+# rationale: builder-deployer — agent builds an HTML site in-session and the
+# Vercel deploy is performed OUT-OF-SESSION by the host post_session_hook so the
+# token never enters the agent transcript or sandbox (NIST SP 800-204C
+# build/deploy separation, OWASP Secrets Management Cheat Sheet, CVE-2026-44479).
+environment:
+  networking:
+    # rationale: agent fetches Google Fonts CSS to inline font links; no other egress needed.
+    type: limited
+    allowed_hosts:
+      - fonts.googleapis.com
+      - fonts.gstatic.com
+
+agents:
+  - key: builder
+    file: agents/builder.yaml
+    is_director: true
+
+run:
+  attach_vault: false
+  attach_stores: false
+  stall_ms: 240000
+  max_restarts: 1
+  outcome:
+    description: "A polished single-file Duplo-style fractions site at /mnt/session/outputs/site/index.html with three interactive activities, a README, and manifest.json with ready_to_deploy:true."
+    rubric_file: rubric.md
+    max_iterations: 2
+  post_session_hook:
+    command: bun run "$BRAID_FLOW_DIR/../../.claude/skills/braid/post-hooks/vercel-deploy.ts"
+    env_passthrough: [VERCEL_TOKEN]
+    timeout_ms: 300000

@@ -1,0 +1,14 @@
+# {{flow_name}} flow rubric
+
+## Critical — FAIL if any fail
+1. `/mnt/session/outputs/manifest.json` exists and is valid JSON
+2. `manifest.shot_count` equals {{shot_count}}
+3. `manifest.shots` is an array of length {{shot_count}}
+4. Every `shots[i].video_url` is reachable (HTTP 200)
+5. Every `shots[i].critic.pass` is `true`
+6. `manifest.approved_count` equals {{shot_count}}
+
+## Quality — flag but do not fail
+7. No two shots have the same `prompt_hash` (no duplicate prompts)
+8. `manifest.shots[*].image_url` are reachable
+9. Critic notes are specific (not vague) for any rejected attempts on the trajectory

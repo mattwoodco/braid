@@ -78,8 +78,34 @@ export type NetworkingSpec =
       allow_package_managers?: boolean;
     };
 
+/**
+ * PackagesSpec mirrors the Anthropic environments `packages` block. Each
+ * package manager is installed once per environment and cached across all
+ * sessions that share the env (apt + npm + pip + ...). Authority:
+ * https://platform.claude.com/docs/en/managed-agents/environments
+ *   "Packages are installed by their respective package managers and
+ *    cached across sessions that share the same environment."
+ */
+export type PackagesSpec = {
+  apt?: string[];
+  cargo?: string[];
+  gem?: string[];
+  go?: string[];
+  npm?: string[];
+  pip?: string[];
+};
+
 export type EnvironmentSpec = {
   networking?: NetworkingSpec;
+  packages?: PackagesSpec;
+  /**
+   * When true, setup spawns a one-shot session after env creation that invokes
+   * each declared package so apt/npm/pip caches materialize. Subsequent
+   * sessions sharing the env reuse the cache. Defaults to true when
+   * `packages` is declared; ignored otherwise. Set false to defer the install
+   * cost to the first real `run`.
+   */
+  warm?: boolean;
 };
 
 /**
@@ -238,6 +264,11 @@ export async function runPostSessionHook(
     BRAID_FLOW_NAME: ctx.flowName,
     BRAID_FLOW_DIR: ctx.flowDir,
     BRAID_OUTPUT_DIR: ctx.outputDir,
+    // Stable anchor for post-hooks that need to reference the skill or
+    // repo files (e.g. .claude/skills/braid/post-hooks/*). Avoids brittle
+    // `$BRAID_FLOW_DIR/../../...` paths that break for namespaced flows
+    // like `flows/_examples/<name>/`.
+    BRAID_REPO_ROOT: REPO_ROOT,
   };
   for (const key of passthrough) {
     const v = process.env[key];
@@ -352,15 +383,21 @@ export function applyDefaults(m: Partial<Manifest> & { name: string }): Manifest
  *    `allowed_hosts` list. Follow the principle of least privilege..."
  */
 function defaultEnvironment(env: EnvironmentSpec | undefined): EnvironmentSpec {
+  // Warm defaults to true when packages are declared. Authors opt out
+  // explicitly with `environment.warm: false` to defer the install cost
+  // to the first real run.
+  const warm = env?.warm ?? (env?.packages !== undefined);
   const networking = env?.networking;
   if (!networking) {
     return {
+      ...env,
       networking: {
         type: "limited",
         allowed_hosts: [],
         allow_mcp_servers: false,
         allow_package_managers: false,
       },
+      warm,
     };
   }
   if (networking.type === "limited") {
@@ -372,9 +409,10 @@ function defaultEnvironment(env: EnvironmentSpec | undefined): EnvironmentSpec {
         allow_mcp_servers: networking.allow_mcp_servers ?? false,
         allow_package_managers: networking.allow_package_managers ?? false,
       },
+      warm,
     };
   }
-  return { ...env, networking };
+  return { ...env, networking, warm };
 }
 
 export function listFlows(): string[] {
@@ -599,6 +637,62 @@ export function shouldWipeStateFiles(argv: readonly string[]): {
   return { wipe: true, reason: "non-interactive + --yes confirmed" };
 }
 
+/**
+ * Tier → model mapping. Agents may declare `tier: orchestrate|reason|execute|classify`
+ * in lieu of a full `model.id`; the orchestrator resolves to the current
+ * pinned model id below. Explicit `model.id` always wins. Edit this map (or
+ * set BRAID_MODEL_<TIER> env vars) to re-tune cost/perf globally.
+ *
+ * Pricing reference (Anthropic, as of plan date):
+ *   opus-4-7    $5 in / $25 out per MTok — orchestrate / deep reasoning
+ *   sonnet-4-6  $3 in / $15 out per MTok — reason / execute (default)
+ *   haiku-4-5   $1 in / $5  out per MTok — classify / extract
+ */
+export const MODEL_TIER_MAP: Record<string, string> = {
+  orchestrate: process.env.BRAID_MODEL_ORCHESTRATE ?? "claude-opus-4-7",
+  reason:      process.env.BRAID_MODEL_REASON     ?? "claude-sonnet-4-6",
+  execute:     process.env.BRAID_MODEL_EXECUTE    ?? "claude-sonnet-4-6",
+  classify:    process.env.BRAID_MODEL_CLASSIFY   ?? "claude-haiku-4-5",
+};
+
+function applyTierModel(def: Record<string, unknown>): void {
+  const tier = def.tier as string | undefined;
+  if (!tier) return;
+  delete def.tier;
+  const current = def.model as { id?: string } | undefined;
+  if (current?.id) return; // explicit model.id wins
+  const id = MODEL_TIER_MAP[tier];
+  if (!id) throw new Error(`agent.tier=${tier} not in MODEL_TIER_MAP. Known: ${Object.keys(MODEL_TIER_MAP).join(", ")}`);
+  def.model = { id, speed: "standard" };
+}
+
+/**
+ * Concatenate optional `system_stable` + `system_dynamic` into a single
+ * `system: string` for the Managed Agents agent-create call.
+ *
+ * Managed Agents `/v1/agents` declares `system` as a plain string (see
+ * shared/managed-agents-core.md — Agent Object). Content-block arrays with
+ * `cache_control` are a Messages API construct and are rejected here with
+ * `400 system: value must be a string`. Prompt caching on Managed Agents
+ * is automatic: the pinned agent.system becomes the cache prefix across
+ * every session that references the agent — no manual breakpoints needed.
+ *
+ * The split is kept in template YAML for editorial reasons (stable role +
+ * rules in one block, per-instance vars in another) — we just join them
+ * with a blank line before sending.
+ */
+function applySystemCacheSplit(def: Record<string, unknown>): void {
+  const stable = def.system_stable as string | undefined;
+  const dynamic = def.system_dynamic as string | undefined;
+  if (!stable && !dynamic) return;
+  delete def.system_stable;
+  delete def.system_dynamic;
+  const parts: string[] = [];
+  if (stable) parts.push(stable);
+  if (dynamic) parts.push(dynamic);
+  def.system = parts.join("\n\n");
+}
+
 export async function ensureResources(
   manifest: Manifest,
   state: State,
@@ -616,12 +710,27 @@ export async function ensureResources(
       allow_mcp_servers: false,
       allow_package_managers: false,
     };
+    const packages = manifest.environment?.packages;
+    // Packages are baked into the env at create time; sessions sharing this
+    // env reuse the cached install (per Anthropic environments docs).
+    const config = packages
+      ? { type: "cloud", networking, packages }
+      : { type: "cloud", networking };
     const env = await c.beta.environments.create({
       name: manifest.env_name,
-      config: { type: "cloud", networking } as Parameters<typeof c.beta.environments.create>[0]["config"],
+      config: config as Parameters<typeof c.beta.environments.create>[0]["config"],
     });
     state.env = env.id;
     console.log(`  env: ${env.id}`);
+
+    // Warm the env so apt/npm/pip caches materialize at setup time rather
+    // than on the first real run. Per Anthropic environments docs, packages
+    // install lazily on the first session that uses the env; this spawns a
+    // throwaway session that invokes each declared package so verification
+    // failures surface here, not 60s into a real workload.
+    if (packages && manifest.environment?.warm !== false) {
+      await warmEnvironment(manifest, env.id, packages);
+    }
   }
 
   const vaultSpecs: VaultSpec[] = [
@@ -671,6 +780,8 @@ export async function ensureResources(
     if (state.agents[a.key]) continue;
     const base = parse(readFileSync(fileFromFlow(a.file), "utf-8")) as Record<string, unknown>;
     const def: Record<string, unknown> = { ...base };
+    applySystemCacheSplit(def);
+    applyTierModel(def);
     if (a.mcp_servers) def.mcp_servers = a.mcp_servers;
     if (a.tools) def.tools = a.tools;
     if (!def.tools) def.tools = [...DEFAULT_AGENT_TOOLS];
@@ -694,6 +805,104 @@ export async function ensureResources(
   // while flowDir/<output_dir> lands inside the mounted flows volume (rw).
   mkdirSync(resolve(flowDir, manifest.output_dir), { recursive: true });
   return state;
+}
+
+/**
+ * Defense-in-depth: package names come from the flow author's flow.yaml, not
+ * runtime input, but we still validate before interpolating into a shell
+ * command — a malformed name in a generated/copy-pasted manifest must not
+ * become a command-injection vector (CWE-78).
+ *
+ * Covers apt (`a-z0-9.+-`), pip (`A-Za-z0-9._-`), and npm (including scoped
+ * names `@scope/name`). Names outside this set are rejected with a clear error.
+ */
+const PKG_NAME_RE = /^[A-Za-z0-9@][A-Za-z0-9@._+\/\-]*$/;
+
+function assertSafePackageName(mgr: string, name: string): void {
+  if (!PKG_NAME_RE.test(name)) {
+    throw new Error(
+      `environment.packages.${mgr}: refusing unsafe package name ${JSON.stringify(name)}. ` +
+        `Allowed characters: A-Z a-z 0-9 @ . _ + / -`,
+    );
+  }
+}
+
+/**
+ * Warm a freshly-created env by spawning a one-shot Haiku session that
+ * invokes each declared package. Packages are installed lazily on first
+ * session start (per Anthropic environments docs), then cached across every
+ * subsequent session sharing the env. Doing this at setup time keeps the
+ * first real `run` fast and surfaces install failures (wrong package name,
+ * sandbox restriction) at provisioning time instead of mid-flow.
+ *
+ * Best-effort: a failure here logs and continues — the env still works, the
+ * first real session will pay the install cost instead.
+ */
+async function warmEnvironment(
+  manifest: Manifest,
+  envId: string,
+  packages: PackagesSpec,
+): Promise<void> {
+  const probes: string[] = [];
+  for (const pkg of packages.apt ?? []) {
+    assertSafePackageName("apt", pkg);
+    probes.push(`dpkg -s ${pkg} >/dev/null 2>&1 && echo "apt:${pkg} OK" || { echo "apt:${pkg} MISSING"; exit 1; }`);
+  }
+  for (const pkg of packages.npm ?? []) {
+    assertSafePackageName("npm", pkg);
+    // Try normal resolution AND the pre-installed location at
+    // /opt/node-tools/node_modules (where Anthropic ships Playwright et al).
+    // A bare `node -e "require('${pkg}')"` from an arbitrary CWD misses the
+    // pre-installed path and reports false MISSING. See SKILL.md → Browser
+    // rendering with Playwright for the runtime-side counterpart.
+    probes.push(
+      `node -e "try{require('${pkg}')}catch(e){try{require('/opt/node-tools/node_modules/${pkg}')}catch(e2){process.exit(1)}}" 2>/dev/null && echo "npm:${pkg} OK" || { echo "npm:${pkg} MISSING"; exit 1; }`,
+    );
+  }
+  for (const pkg of packages.pip ?? []) {
+    assertSafePackageName("pip", pkg);
+    probes.push(`python3 -c "import ${pkg}" >/dev/null 2>&1 && echo "pip:${pkg} OK" || { echo "pip:${pkg} MISSING"; exit 1; }`);
+  }
+  // gem/cargo/go have no universal "is installed" probe across all package
+  // shapes (binary vs library, scoped vs unscoped). Skip explicit verification
+  // for those — opening the session is enough to materialize the cache.
+  if (probes.length === 0) return;
+
+  console.log(`  warming env (${probes.length} package probe${probes.length === 1 ? "" : "s"})...`);
+  const warmer = await c.beta.agents.create({
+    name: `${manifest.name}-warmup`,
+    model: "claude-haiku-4-5",
+    system:
+      "Run each bash command exactly as given and report the result. Do not improvise, edit, or skip any command.",
+    tools: [{ type: "agent_toolset_20260401", default_config: { enabled: true } }],
+  } as Parameters<typeof c.beta.agents.create>[0]);
+
+  let sessionId: string | undefined;
+  try {
+    const session = await c.beta.sessions.create({
+      agent: warmer.id,
+      environment_id: envId,
+    } as Parameters<typeof c.beta.sessions.create>[0]);
+    sessionId = session.id;
+
+    const stream = await c.beta.sessions.events.stream(session.id);
+    await c.beta.sessions.events.send(session.id, {
+      events: [{
+        type: "user.message",
+        content: [{ type: "text", text: `Run these and report any failures:\n\n${probes.join("\n")}` }],
+      }] as Parameters<typeof c.beta.sessions.events.send>[1]["events"],
+    });
+    for await (const e of stream) {
+      if (e.type === "session.status_idle" || e.type === "session.status_terminated") break;
+    }
+    console.log(`  warmed env: ${envId}`);
+  } catch (err) {
+    // Best-effort — first real run will install instead.
+    console.warn(`  warmup failed (env still usable, first run will install): ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    if (sessionId) await c.beta.sessions.archive(sessionId).catch(() => {});
+    await c.beta.agents.archive(warmer.id).catch(() => {});
+  }
 }
 
 async function seedStore(
@@ -1071,8 +1280,16 @@ export async function downloadSessionFiles(sessionId: string, outDir: string, em
       // Use Uint8Array directly so Bun's stricter writeFileSync types accept
       // the buffer without a Node-vs-Bun ArrayBufferView mismatch.
       const buf = new Uint8Array(await (await c.beta.files.download(f.id)).arrayBuffer());
-      writeFileSync(`${outDir}/${fname}`, buf);
-      emit("saved", `${outDir}/${fname}`);
+      const outPath = `${outDir}/${fname}`;
+      // Files API filenames may include subdirectories (e.g. "site/index.html"
+      // when the agent wrote to /mnt/session/outputs/site/). Create the
+      // parent dir before writing so subdir structure is preserved.
+      if (fname.includes("/")) {
+        const parent = outPath.slice(0, outPath.lastIndexOf("/"));
+        mkdirSync(parent, { recursive: true });
+      }
+      writeFileSync(outPath, buf);
+      emit("saved", outPath);
       saved.push(fname);
     }
   } catch {
@@ -1227,7 +1444,9 @@ export async function runReflection(
       };
     }
 
-    const path = `reflections/${new Date().toISOString().slice(0, 10)}-${sessionId.slice(-8)}.md`;
+    // Memory paths MUST start with `/` per the Managed Agents memory API
+    // (`memories.create` returns 400 "path: value does not match" otherwise).
+    const path = `/reflections/${new Date().toISOString().slice(0, 10)}-${sessionId.slice(-8)}.md`;
     await createMemory(c, storeId, { path, content: patternText });
 
     return {

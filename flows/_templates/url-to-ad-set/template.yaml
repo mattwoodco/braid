@@ -1,0 +1,28 @@
+name: url-to-ad-set
+description: |
+  Take a product URL, scout the brand (facts, hero image, palette, typography),
+  then fan out N parallel designer threads via the coordinator to render an
+  ad in each requested size. All threads share one container + filesystem
+  and the scout's facts.json. Outcome-graded against a rubric.
+
+  Uses Managed Agents primitives:
+    - multiagent.coordinator: director fans out N designer threads (≤ 25 concurrent)
+    - memory stores: scout facts persist across runs (per-product namespace)
+    - prompt caching: stable system prompts cached for the run
+    - outcome + rubric: iterate until N ads pass validation
+    - post-session hook: optional Vercel deploy of the ad gallery (host-side)
+
+parameters:
+  - { key: flow_name,    type: string, required: true,  pattern: "^[a-z][a-z0-9-]*$" }
+  - { key: source_url,   type: string, required: true,  description: "Product URL the scout will crawl" }
+  - { key: product_slug, type: string, required: true,  pattern: "^[a-z][a-z0-9-]*$", description: "kebab-case namespace under /products/" }
+  - { key: ad_sizes,     type: "string[]", required: true, description: "WxH strings, e.g. [\"1080x1080\",\"1080x1350\",\"1200x628\"]" }
+  - { key: style_hints,  type: string, required: false, default: "respect the source brand palette and typography; favor editorial restraint over loud sales copy", multiline: true }
+  - { key: copy_voice,   type: string, required: false, default: "confident, specific, benefit-led; no exclamation marks" }
+  - { key: deploy_target,type: string, required: false, default: "none", enum: ["none", "vercel"] }
+
+defaults:
+  agents:
+    director: { tier: orchestrate }
+    scout:    { tier: reason }
+    designer: { tier: execute }

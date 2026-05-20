@@ -1,4 +1,4 @@
-import { mkdirSync, existsSync } from "fs";
+import { mkdirSync, existsSync, writeFileSync } from "fs";
 import { spawn } from "child_process";
 import { dirname as _d } from "path";
 import { fileURLToPath as _f } from "url";
@@ -38,12 +38,18 @@ import {
   runReflection,
   type ReflectionTrigger,
 } from "./lib";
+import { instantiateTemplate, listTemplates, loadTemplate, parseVarsArg } from "./lib-template";
 
 const SKILL_DIR = dirname(fileURLToPath(import.meta.url));
 const [, , cmd, ...rest] = process.argv;
 
 function flowPath(name: string) {
-  return name.endsWith(".yaml") ? name : `flows/${name}/flow.yaml`;
+  if (name.endsWith(".yaml")) return name;
+  // A name containing `/` is a namespaced path under flows/, e.g.
+  // `_examples/foo` -> `flows/_examples/foo/flow.yaml`. This lets us hide
+  // reference flows from the default `braid list` while keeping them
+  // setup-able and run-able via the namespaced id.
+  return `flows/${name}/flow.yaml`;
 }
 
 async function setup(flowName: string) {
@@ -539,6 +545,7 @@ function usage() {
   console.log(`braid — run multi-agent workflows
 
   braid list                            show available flows
+  braid create <description>            scaffold a new flow from a natural-language description
   braid setup <flow>                    create env/vault/stores/agents from flows/<flow>/flow.yaml
   braid run <flow> [brief] [sesn_id]    create or resume a session and stream
   braid sessions <flow> [--pick|--kill|--kill-all]
@@ -550,9 +557,75 @@ function usage() {
 Available flows: ${flows.length ? flows.join(", ") : "(none — create flows/<name>/flow.yaml)"}
 
 Examples:
+  braid create "generate 5 product photos with fal and deploy a gallery to vercel"
   braid setup ad
   braid run ad "60s ad for hiking boots"
   braid sessions ad --pick`);
+}
+
+async function createFromTemplate(flags: Record<string, string>): Promise<void> {
+  const templateName = flags.template;
+  const flowName = flags.name;
+  if (!templateName) throw new Error("create --template <name> is required");
+  if (!flowName) throw new Error("create --name <flow> is required");
+  // Allow namespaced names like `_examples/foo` for hidden reference flows.
+  if (!/^(_[a-z][a-z0-9-]*\/)?[a-z][a-z0-9-]*$/.test(flowName)) {
+    throw new Error(`create --name: ${flowName} must be lowercase kebab-case (optionally prefixed with _namespace/)`);
+  }
+  const targetDir = resolve(REPO_ROOT, "flows", flowName);
+  if (existsSync(targetDir) && !flags.force) {
+    throw new Error(`flows/${flowName} already exists. Pass --force to overwrite.`);
+  }
+  const { manifest } = loadTemplate(REPO_ROOT, templateName);
+  const vars = flags.vars ? parseVarsArg(flags.vars, REPO_ROOT) : {};
+  // The template binds `flow_name` to its YAML resource names (Anthropic
+  // env_name, agent name prefixes, memory store names, etc.) which must
+  // be plain kebab-case. The on-disk path may be namespaced (e.g.
+  // `_examples/foo`); we feed only the tail into the template.
+  const templateFlowName = flowName.includes("/") ? flowName.split("/").pop()! : flowName;
+  const { writes } = instantiateTemplate({ repoRoot: REPO_ROOT, templateName, flowName: templateFlowName, vars });
+  mkdirSync(targetDir, { recursive: true });
+  for (const w of writes) {
+    const abs = resolve(targetDir, w.relPath);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, w.content);
+  }
+  // Smoke-validate by loading the generated flow.yaml — same path setup() takes.
+  loadManifest(flowPath(flowName));
+  console.log(`[braid:create] template=${manifest.name} -> flows/${flowName}`);
+  console.log(`  wrote ${writes.length} files`);
+  console.log(`\nNext: bun .claude/skills/braid/braid.ts setup ${flowName}`);
+}
+
+function createGuidance(description: string) {
+  const desc = description.trim();
+  if (!desc) {
+    console.error("braid create — missing description.\n\nUsage: braid create <description>");
+    process.exit(1);
+  }
+  // The actual scaffolding is assistant-driven. The CLI prints a marker the
+  // assistant recognizes so it follows the "Create command" procedure in
+  // SKILL.md instead of trying to template a flow inline.
+  console.log(`[braid:create] assistant-driven scaffold requested.
+
+Description: ${desc}
+
+This command is handled by the assistant (Claude). Follow the procedure
+documented in .claude/skills/braid/SKILL.md under "## Create command":
+
+  1. Classify the flow (simple-task / mcp / fal / website / builder-deployer /
+     ad-generator / multi-shot video).
+  2. Pick a kebab-case flow name (ask the user if ambiguous — one question max).
+  3. Scaffold flows/<name>/flow.yaml, agents/<key>.yaml, rubric.md, LESSONS.md.
+  4. Respect the security posture defaults (networking limited, permission_policy
+     always_ask, no secrets in briefs, deploys via run.post_session_hook).
+  5. Run \`bun .claude/skills/braid/braid.ts setup <name>\` and confirm with the
+     user before the first run.
+
+Then, after every run, follow "## Self-improvement after every run" — inspect
+outcome/sentinel/manifest signals, patch the flow at the root cause, append to
+flows/<name>/LESSONS.md, and re-run.
+`);
 }
 
 try {
@@ -560,6 +633,32 @@ try {
     case "list": {
       const flows = listFlows();
       console.log(flows.length ? flows.join("\n") : "(no flows yet)");
+      break;
+    }
+    case "examples": {
+      const sub = rest[0] ?? "list";
+      if (sub !== "list") { console.error("usage: braid examples list"); process.exit(1); }
+      const dir = resolve(REPO_ROOT, "flows", "_examples");
+      if (!existsSync(dir)) { console.log("(no examples yet)"); break; }
+      const { readdirSync } = await import("fs");
+      const names = readdirSync(dir, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && existsSync(resolve(dir, e.name, "flow.yaml")))
+        .map((e) => `_examples/${e.name}`)
+        .sort();
+      console.log(names.length ? names.join("\n") : "(no examples yet)");
+      break;
+    }
+    case "create": {
+      const { positional, flags } = parseFlags(rest);
+      if (flags.template) {
+        await createFromTemplate(flags);
+      } else if (positional[0] === "list" || flags.list === "true") {
+        const t = listTemplates(REPO_ROOT);
+        console.log(t.length ? t.join("\n") : "(no templates yet)");
+      } else {
+        const desc = flags.freeform || positional.join(" ");
+        createGuidance(desc);
+      }
       break;
     }
     case "setup": await setup(rest[0]); break;

@@ -1,0 +1,60 @@
+# yaml-language-server: $schema=../../.claude/skills/braid/flow.schema.json
+name: social-ads
+env_name: braid-social-ads
+state_file: state.json
+output_dir: outputs/social-ads
+brief_default: |
+  https://googlebook.google/
+
+# rationale: scout fetches an arbitrary user-supplied URL; in-session
+# Chromium fetches CDN-hosted assets during render. Director rejects briefs
+# without a valid http(s) URL.
+environment:
+  networking:
+    type: unrestricted
+  # Playwright's npm postinstall ships a pinned Chromium under
+  # /opt/pw-browsers/. Setup auto-warms this env so the first real run is hot.
+  packages:
+    npm:
+      - playwright
+
+memory_stores:
+  - key: scoutStore
+    name: social-ads-scout
+    access: read_write
+    instructions: |
+      Product facts per URL, namespaced under /products/<slug>/.
+      Files: facts.json, images.json, logo.json, fonts.json.
+  - key: designerStore
+    name: social-ads-designer
+    access: read_write
+    instructions: |
+      Brand tokens + ad HTML + validation per product, /products/<slug>/.
+
+agents:
+  - key: scout
+    file: agents/scout.yaml
+  - key: designer
+    file: agents/designer.yaml
+  - key: director
+    file: agents/director.yaml
+    is_director: true
+    coordinator: [scout, designer]
+
+run:
+  attach_stores: true
+  stall_ms: 360000
+  max_restarts: 1
+  log_runs: true
+  outcome:
+    description: |
+      Either (a) no URL → director replied "no URL provided — nothing to do"
+      and outputs is empty; or (b) /mnt/session/outputs/ contains:
+        - manifest.json with product, hero_image_url, and 3 ads
+        - colors.css, typography.css
+        - static-ad-1.html + static-ad-1.png (1080×1080 square)
+        - static-ad-2.html + static-ad-2.png (1080×1350 portrait)
+        - static-ad-3.html + static-ad-3.png (1080×1920 story)
+        - validation.json with pass:3 fail:0
+    rubric_file: rubric.md
+    max_iterations: 2

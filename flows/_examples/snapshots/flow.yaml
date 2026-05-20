@@ -1,0 +1,71 @@
+# yaml-language-server: $schema=../../.claude/skills/braid/flow.schema.json
+# Generated from flows/_templates/image-series-with-memory/.
+name: snapshots
+brief_default: |
+  3 photos: a single cup of coffee on a wooden table near a sunny window. vary the angle and mood across the shots.
+
+# rationale: showcase — downloads Fal-generated media via curl from the sandbox.
+environment:
+  networking:
+    type: unrestricted
+
+vaults:
+  - display_name: fal
+    credential:
+      display_name: Fal MCP
+      mcp_server_url: https://mcp.fal.ai/mcp
+      token_env: FAL_API_KEY
+
+memory_stores:
+  - key: styleStore
+    name: snapshots-style
+    access: read_write
+    instructions: |
+      Locked visual style for this flow. Read style.md before composing
+      prompts. Restate the locked Visual Bible VERBATIM inside every
+      Fal prompt.
+    seed:
+      mount: /mnt/memory/style
+      files: [seeds/style.md]
+    dream_instructions: |
+      Review session prompts and outcomes. Update style.md with patterns
+      that produced grader-passing shots. Remove guidance that led to
+      retries or failures. Keep under 40 lines.
+  - key: lessonsStore
+    name: snapshots-lessons
+    access: read_write
+    instructions: |
+      Reusable patterns extracted by the reflector after each run.
+      Read this before composing prompts; the reflector appends after.
+
+agents:
+  - key: photographer
+    file: agents/photographer.yaml
+    is_director: true
+    mcp_servers:
+      - { type: url, url: https://mcp.fal.ai/mcp, name: fal }
+    tools:
+      - type: agent_toolset_20260401
+        default_config: { enabled: true }
+      - type: mcp_toolset
+        mcp_server_name: fal
+        default_config:
+          enabled: true
+          permission_policy: { type: always_allow }
+  - key: reflector
+    file: agents/reflector.yaml
+
+run:
+  attach_vault: true
+  log_runs: true
+  stall_ms: 240000
+  max_restarts: 0
+  outcome:
+    description: "3 image files and a manifest.json exist in /mnt/session/outputs/, every image has dimensions matching aspect_ratio 16:9."
+    rubric_file: rubric.md
+    max_iterations: 1
+  # Per-run reflection — pulls grader-passing patterns into lessonsStore so
+  # subsequent runs read learned guidance, not a cold prompt.
+  reflection:
+    agent_key: reflector
+    target_store: lessonsStore

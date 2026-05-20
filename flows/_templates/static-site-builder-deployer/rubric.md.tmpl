@@ -1,0 +1,20 @@
+# {{flow_name}} flow rubric
+
+## Critical — FAIL if any fail
+1. `/mnt/session/outputs/manifest.json` exists and is valid JSON
+2. `manifest.site_dir` equals `"."` and `manifest.ready_to_deploy` is `true`
+3. `/mnt/session/outputs/index.html` exists and is non-empty (Files API flattens subdirectories — write FLAT at the outputs root)
+4. `index.html` contains a `<title>` tag with text "{{site_title}}"
+5. `index.html` parses as valid HTML5 (no unclosed tags in the first error from a strict parser)
+
+## Quality — flag but do not fail
+6. Page renders without errors at 1280×800 desktop viewport
+7. Page is mobile-responsive at 375×667
+8. No external requests fail (broken CDN links, missing fonts)
+
+## Post-hook — graded outside the session
+The host post_session_hook deploys the site to Vercel AFTER the agent
+session ends and appends `manifest.page_url` + `manifest.deployed_at`.
+That work is not gradable by the in-session rubric (the agent cannot
+make `page_url` true). Check the saved outputs dir for the final
+manifest.

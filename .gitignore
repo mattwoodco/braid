@@ -1,8 +1,10 @@
 .env*.local
-flows/*/state.json
-flows/*/outputs/
+flows/**/state.json
+flows/**/outputs/
 outputs/
+.braid-run-logs/
 node_modules/
+web/dist/
 _docs
 .DS_Store
 

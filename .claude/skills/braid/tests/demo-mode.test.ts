@@ -19,7 +19,7 @@ const BRAID = join(REPO_ROOT, ".claude", "skills", "braid", "braid.ts");
 describe("demo mode — bun run braid.ts demo <flow>", () => {
   test("runs end-to-end with no real keys, emits expected event timeline", async () => {
     const proc = Bun.spawnSync({
-      cmd: ["bun", "run", BRAID, "demo", "ad"],
+      cmd: ["bun", "run", BRAID, "demo", "_archive/ad"],
       cwd: REPO_ROOT,
       env: {
         ...process.env,
@@ -60,7 +60,7 @@ describe("demo mode — bun run braid.ts demo <flow>", () => {
 
   test("emits the demo banner so users know they are not making real API calls", async () => {
     const proc = Bun.spawnSync({
-      cmd: ["bun", "run", BRAID, "demo", "ad"],
+      cmd: ["bun", "run", BRAID, "demo", "_archive/ad"],
       cwd: REPO_ROOT,
       env: {
         ...process.env,
@@ -80,7 +80,7 @@ describe("demo mode — bun run braid.ts demo <flow>", () => {
 
   test("refuses to run demoFlow if BRAID_DEMO_MODE is not set", async () => {
     const proc = Bun.spawnSync({
-      cmd: ["bun", "run", BRAID, "demo", "ad"],
+      cmd: ["bun", "run", BRAID, "demo", "_archive/ad"],
       cwd: REPO_ROOT,
       env: {
         ...process.env,

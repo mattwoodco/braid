@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=../../.claude/skills/braid/flow.schema.json
+# Generated from flows/_templates/static-site-builder-deployer/.
+name: {{flow_name}}
+brief_default: |
+{{brief|indent2}}
+
+# rationale: showcase — builder pulls assets via unpkg / CDNs as needed.
+# Vercel deploy is performed OUT-OF-SESSION by the host post_session_hook
+# below, so the token never enters the agent transcript or sandbox
+# (NIST SP 800-204C build/deploy separation, OWASP Secrets Management
+# Cheat Sheet, CVE-2026-44479).
+environment:
+  networking:
+    type: unrestricted
+
+agents:
+  - key: builder
+    file: agents/builder.yaml
+    is_director: true
+    tools:
+      - type: agent_toolset_20260401
+        default_config:
+          enabled: true
+          permission_policy: { type: always_allow }
+
+run:
+  attach_vault: false
+  attach_stores: false
+  stall_ms: 240000
+  max_restarts: 1
+  outcome:
+    description: "A built static site at /mnt/session/outputs/index.html plus manifest.json with site_dir:'.', project_name:'{{vercel_project}}', ready_to_deploy:true."
+    rubric_file: rubric.md
+    max_iterations: 2
+  post_session_hook:
+    command: bun run "$BRAID_REPO_ROOT/.claude/skills/braid/post-hooks/vercel-deploy.ts"
+    env_passthrough: [VERCEL_TOKEN]
+    timeout_ms: 300000

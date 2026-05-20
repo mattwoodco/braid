@@ -1,0 +1,34 @@
+name: viral-video-ad
+description: |
+  Produce an N-shot viral video ad with a brand-aware producer, a quality
+  critic that grades each shot against the brand guide, and a sentinel
+  watchdog that catches stalls. Brand guide is a read-only memory store;
+  project state and Fal result cache are read-write.
+
+  Uses Managed Agents primitives:
+    - multiagent.coordinator: director coordinates [producer, critic]
+    - memory stores (3): brandStore (read-only seeded guide),
+      projectStore (run state), cacheStore (sha256(prompt) → fal result)
+    - sentinel agent: declared via sentinel_key (Braid orchestrator wakes
+      it if the stream goes silent past stall_ms)
+    - vault: Fal MCP
+    - outcome + rubric: producer iterates with critic feedback until
+      manifest.shots all pass
+
+parameters:
+  - { key: flow_name,    type: string, required: true,  pattern: "^[a-z][a-z0-9-]*$" }
+  - { key: brand_name,   type: string, required: true }
+  - { key: product,      type: string, required: true,  description: "What's being advertised" }
+  - { key: duration_sec, type: int,    required: true,  enum: [15, 30, 60, 90] }
+  - { key: shot_count,   type: int,    required: true,  enum: [3, 4, 5, 6, 8] }
+  - { key: tone,         type: string, required: false, default: "earnest, off-kilter, slightly weird — never corporate, never cynical" }
+  - { key: target_audience, type: string, required: true, description: "One sentence about who this is for" }
+  - { key: brand_style,  type: string, required: true,  multiline: true, description: "Locked brand voice + visual rules. Written into brandStore seed." }
+  - { key: banned_terms, type: "string[]", required: false, description: "Words/phrases that must NOT appear in any prompt or copy" }
+
+defaults:
+  agents:
+    director: { tier: orchestrate }
+    producer: { tier: reason }
+    critic:   { tier: classify }
+    sentinel: { tier: classify }

@@ -1,0 +1,75 @@
+# yaml-language-server: $schema=../../.claude/skills/braid/flow.schema.json
+name: static-ads
+env_name: braid-static-ads
+state_file: state.json
+output_dir: outputs/static-ads
+brief_default: |
+  https://milkmakeup.com/products/hydro-grip-gel-tint-hydrating-skin-tint
+
+# rationale: user supplies an arbitrary product URL, so scout must reach any
+# host on the public web. The director rejects briefs that don't contain a
+# valid http(s) URL, which bounds the surface to one explicit user input per
+# session.
+environment:
+  networking:
+    type: unrestricted
+
+memory_stores:
+  - key: scoutStore
+    name: static-ads-scout
+    access: read_write
+    instructions: |
+      Product facts per URL. Namespace every write under /products/<slug>/.
+      Files: facts.json, images.json, logo.json, fonts.json. Read first;
+      if /products/<slug>/facts.json exists, reuse it.
+  - key: stylistStore
+    name: static-ads-stylist
+    access: read_write
+    instructions: |
+      Brand tokens per product. Namespace under /products/<slug>/.
+      Files: brand-summary.md, colors.css, typography.css, aesthetic.md.
+  - key: copyStore
+    name: static-ads-copy
+    access: read_write
+    instructions: |
+      Ad copy per product. Namespace under /products/<slug>/.
+      Files: headlines.md, primary-copy.md, ctas.md.
+  - key: designerStore
+    name: static-ads-designer
+    access: read_write
+    instructions: |
+      Static ad HTML per product. Namespace under /products/<slug>/.
+      Files: static-ad-1.html through static-ad-5.html.
+
+agents:
+  - key: scout
+    file: agents/scout.yaml
+  - key: stylist
+    file: agents/stylist.yaml
+  - key: copywriter
+    file: agents/copywriter.yaml
+  - key: designer
+    file: agents/designer.yaml
+  - key: director
+    file: agents/director.yaml
+    is_director: true
+    coordinator: [scout, stylist, copywriter, designer]
+
+run:
+  attach_stores: true
+  stall_ms: 240000
+  max_restarts: 1
+  log_runs: true
+  outcome:
+    description: |
+      Either (a) no URL in brief → director replied "no URL provided — nothing to do" and outputs is empty;
+      or (b) /mnt/session/outputs/ contains:
+        - manifest.json with product, brand, copy, and ads sections
+        - index.html gallery at the outputs root
+        - brand/{brand-summary.md, colors.css, typography.css, aesthetic.md}
+        - assets/{images.json, logo.json, fonts.json}
+        - copy/{headlines.md, primary-copy.md, ctas.md}
+        - ads/static-ad-1.html through static-ad-5.html
+      and each ad's HTML links to ../brand/colors.css and ../brand/typography.css.
+    rubric_file: rubric.md
+    max_iterations: 1

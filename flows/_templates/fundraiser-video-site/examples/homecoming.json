@@ -1,0 +1,15 @@
+{
+  "cause_title": "Welcome Them Home",
+  "subtitle": "Supporting the training and placement of service dogs with returning veterans.",
+  "brief": "Build a one-page fundraiser site for \"Welcome Them Home\" — supporting the training and placement of service dogs with returning veterans.\n\nThe page features THREE looping hero videos in sequence (a 3-shot emotional arc: ear-twitch at the door → tail-thunder mid-hallway → tackle-embrace on the porch) and a prominent \"Support Veteran Service Dogs\" button linking to https://example.com/donate.",
+  "shot_count": 3,
+  "visual_bible": "Late-afternoon golden hour, warm low sun raking through a screen door. Suburban Midwestern porch with chipped white paint and a worn welcome mat. Golden retriever with a greying muzzle and slightly cloudy eyes. Returning service member in fatigues, seen primarily from behind. Shot on 35mm film, shallow depth of field, soft dust motes catching sunlight. Documentary realism — NOT slow motion, NOT triumphant-orchestral, NOT staged. Warm honey-and-amber palette with cool screen-door shadow. 16:9.",
+  "shots": [
+    "HOOK: Tight on the dog's face at the screen door, one ear twitching as it hears a distant car door close. Catchlights in the eyes. Stillness about to break.",
+    "ESCALATION: Hallway floor level, dog mid-sprint toward the door, tail a blur, claws skittering on hardwood, late sun stripes across the floor.",
+    "PAYOFF: Wide on the porch from inside the screen door: service member kneeling, dog mid-leap into their arms, duffel bag on the steps."
+  ],
+  "cta_text": "Support Veteran Service Dogs",
+  "cta_href": "https://example.com/donate",
+  "palette_hint": "warm honey and golden-hour amber with deep navy or burgundy accents"
+}

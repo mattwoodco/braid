@@ -1,0 +1,73 @@
+# yaml-language-server: $schema=../../.claude/skills/braid/flow.schema.json
+# Generated from flows/_templates/viral-video-ad/.
+name: hiking-boots
+env_name: braid-hiking-boots
+state_file: state.json
+output_dir: outputs/hiking-boots
+brief_default: "60s viral ad for North Notch: indie hiking boots, made in small Vermont batches"
+
+# rationale: producer downloads Fal-generated media via curl from the
+# sandbox. Slice 20 follow-up will scope networking to Fal CDN hosts.
+environment:
+  networking:
+    type: unrestricted
+
+vault:
+  display_name: fal
+  credential:
+    display_name: Fal MCP
+    mcp_server_url: https://mcp.fal.ai/mcp
+    token_env: FAL_API_KEY
+
+memory_stores:
+  - key: brandStore
+    name: hiking-boots-brand
+    access: read_only
+    instructions: "Brand guide. Read first; never modify."
+    seed:
+      mount: /mnt/memory/brand
+      files:
+        - seeds/brand/style.md
+        - seeds/brand/banned-terms.md
+  - key: projectStore
+    name: hiking-boots-project
+    access: read_write
+    instructions: "Project state. Append shot decisions and asset URLs."
+  - key: cacheStore
+    name: hiking-boots-cache
+    access: read_write
+    instructions: "sha256(prompt) -> fal result cache. Check before generating; write after."
+
+agents:
+  - key: critic
+    file: agents/critic.yaml
+  - key: sentinel
+    file: agents/sentinel.yaml
+  - key: producer
+    file: agents/producer.yaml
+    mcp_servers:
+      - { type: url, url: https://mcp.fal.ai/mcp, name: fal }
+    tools:
+      - type: agent_toolset_20260401
+        default_config: { enabled: true }
+      - type: mcp_toolset
+        mcp_server_name: fal
+        default_config:
+          enabled: true
+          permission_policy: { type: always_allow }
+  - key: director
+    file: agents/director.yaml
+    is_director: true
+    coordinator: [producer, critic]
+
+sentinel_key: sentinel
+
+run:
+  attach_vault: true
+  attach_stores: true
+  stall_ms: 180000
+  max_restarts: 2
+  outcome:
+    description: "Approved shot manifest at /mnt/session/outputs/manifest.json with exactly 5 shots, every video_url reachable, every critic.pass=true."
+    rubric_file: rubric.md
+    max_iterations: 2

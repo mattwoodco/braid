@@ -1,0 +1,27 @@
+name: image-series-with-memory
+description: |
+  Generate N stills via Fal MCP that share a consistent visual treatment,
+  with a reflector that writes reusable patterns to a memory store after
+  each run. The next run starts smarter than the last.
+
+  Uses Managed Agents primitives:
+    - memory stores (2): styleStore (seeded patterns, dream-eligible) +
+      lessonsStore (per-run reflections, read-write)
+    - vault: Fal MCP credential
+    - reflection: run.reflection runs the reflector agent post-session and
+      appends grader-passing patterns to lessonsStore
+    - prompt caching: stable photographer prompt + locked aesthetic = cache hit on every shot
+    - outcome + rubric: iterate until N files exist with valid dimensions
+
+parameters:
+  - { key: flow_name,    type: string, required: true, pattern: "^[a-z][a-z0-9-]*$" }
+  - { key: subject,      type: string, required: true, description: "One sentence describing the subject of every shot (e.g. \"single cup of coffee on a wooden table near a sunny window\")" }
+  - { key: variation,    type: string, required: true, description: "How the N shots should differ (\"vary the angle and mood\", \"three times of day\", etc.)" }
+  - { key: count,        type: int,    required: true, enum: [2, 3, 4, 5, 6] }
+  - { key: aspect_ratio, type: string, required: false, default: "16:9", enum: ["16:9", "1:1", "4:5", "9:16", "3:2"] }
+  - { key: style_seed,   type: string, required: false, default: "honest light, subtle film grain, restrained palette, documentary realism — NOT stylized, NOT over-graded", multiline: true, description: "Locked aesthetic; written into seed style.md" }
+
+defaults:
+  agents:
+    photographer: { tier: reason }
+    reflector:    { tier: classify }

@@ -1,0 +1,15 @@
+{
+  "site_title": "Solids · Vol. 02",
+  "brief": "Build a single-page Three.js shape carousel. Six platonic / topological solids, physical materials (pearl, gold, jade, glass, copper, obsidian), keyboard / wheel / drag / dot nav. ACES tone mapping, subtle film-grain overlay. Fraunces for display type, JetBrains Mono for labels.\n\nThe title MUST be a time-of-day phrase derived from current UTC (\"Blue Hour\", \"Late Afternoon\", \"Witching Hour\", \"Cobalt Dusk\"). Use it in BOTH the <title> tag and the header brand text.",
+  "design_system": "Editorial-meets-three-js. Off-black background (#0a0a0d), warm pearl + cool blue palette. Generous whitespace around the carousel. ACES filmic tone mapping in the renderer. Subtle 1px film grain overlay via CSS.",
+  "required_elements": [
+    "Three.js scene loaded from unpkg",
+    "Exactly 6 solids in the carousel",
+    "Keyboard arrow-key nav",
+    "Mouse wheel nav",
+    "Drag-to-rotate within a solid",
+    "Dot nav strip showing position in the carousel",
+    "Fresh time-of-day title in <title> and header"
+  ],
+  "tier": "orchestrate"
+}
