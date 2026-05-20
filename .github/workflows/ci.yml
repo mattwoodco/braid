@@ -59,11 +59,11 @@ jobs:
         # ProactiveQuestion decision 72aed882. Pure build, no push.
         run: docker build -t braid:ci-smoke .
 
-      - name: Coverage gate (Slice 45 — ≥80% line / ≥70% branch on lib.ts)
+      - name: Coverage gate (≥80% function / ≥70% line on lib.ts)
         working-directory: .claude/skills/braid
         # Bun's --coverage flag prints a report but doesn't fail on threshold by
         # itself. Parse the output and fail if either floor is breached.
-        # Authority: docs/coverage-policy.md; Memento plan node ca9deec2.
+        # Authority: docs/coverage-policy.md
         run: |
           set -euo pipefail
           OUT=$(bun test --coverage 2>&1)

@@ -217,4 +217,4 @@ When you're confident, do a real `setup` + `run` to see it in action.
 
 ---
 
-*Tutorial last updated 2026-05-15. Slice 110 plan node `75775a16`. Commands verified by `tests/quickstart-commands.test.ts`.*
+*Tutorial last updated 2026-05-15. Commands verified by [`tests/quickstart-commands.test.ts`](../.claude/skills/braid/tests/quickstart-commands.test.ts).*

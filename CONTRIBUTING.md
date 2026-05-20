@@ -4,11 +4,13 @@ Braid is a published reference for Anthropic Managed Agents — patterns here ge
 
 ## TL;DR
 
-1. **One PR per plan-ledger slice.** Stacked in dependency order.
+A "change" here means one small, end-to-end increment: failing test → minimum code → optional cleanup. In vertical-slicing methodology this unit is called a "slice" — the term doesn't matter, the discipline does.
+
+1. **One small, end-to-end change per PR.** If your change depends on another, stack them in order and declare the base in the PR body.
 2. **PR titles use neutral refactor-style language** during the security fix window. The mapping to private audit anchors lives in `docs/audit-*.PRIVATE.md` (gitignored).
 3. **TDD Red-Green-Refactor is mandatory** for any code change.
 4. **Anti-examples never live in the production-mode tree.** They live in `examples/anti-patterns/` with `BAD-DO-NOT-COPY-` filename prefix, or not at all.
-5. **Authoritative-source citations** in every commit body. No blog-only sources; primary docs, standards, or recorded Memento decisions.
+5. **Authoritative-source citations** in every commit body. No blog-only sources; cite primary docs, formal standards (NIST, OWASP, IETF, ISO, W3C), or — when the choice is purely internal — a decision record in [`docs/decisions/`](docs/decisions/).
 
 ## Why these rules
 
@@ -29,17 +31,17 @@ Braid is a published reference for Anthropic Managed Agents — patterns here ge
 
 ## Workflow
 
-### 1. Open the plan-ledger slice
+### 1. Open or claim an issue
 
-Every change starts from a Memento plan node. Find the relevant slice or capture an idea first.
+Every change starts from a tracked unit of work. Either find an existing [open issue](../../issues), or open a new one (or a draft PR) with a one-paragraph description before writing code. This keeps reviewers oriented and prevents two contributors from racing on the same change.
 
 ### 2. Branch from the prerequisite
 
 ```bash
-# For a root slice with no prereqs:
+# For a change with no prereqs:
 git checkout -b refactor-env-config main
 
-# For a stacked slice:
+# For a stacked change:
 git checkout -b tighten-brief-expansion refactor-env-config
 ```
 
@@ -47,7 +49,7 @@ Branch names use neutral refactor-style language. Do not name a branch after a v
 
 ### 3. RGR per change
 
-For each discrete change in this slice:
+For each discrete step in this change:
 
 1. **Red** — write a failing test first. Commit:
    ```
@@ -69,7 +71,7 @@ For each discrete change in this slice:
      the flow directory; absolute paths and `..` rejected.
    - tests/expand-brief.test.ts — RGR coverage for traversal patterns.
 
-   Plan-node: 2a1c1e90 (private audit anchor in docs/audit-2026-05-15.PRIVATE.md).
+   Refs: #42  (private audit anchor in docs/audit-2026-05-15.PRIVATE.md).
    ```
 3. **Refactor** — optional cleanup, separate commit if used.
 
@@ -90,7 +92,7 @@ Source: <additional source if applicable>
 Changes:
 - <file>:<line> — <what changed>
 
-Plan-node: <GUID> (anchor in docs/audit-*.PRIVATE.md).
+Refs: #<issue-number>  (anchor in docs/audit-*.PRIVATE.md when applicable).
 ```
 
 **Type:** `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `ci`.
@@ -110,7 +112,7 @@ In order of preference:
 1. **Primary vendor docs** — `platform.claude.com/docs/...`, `nodejs.org/docs`, `bun.sh/docs`. Quote the passage that justifies your change.
 2. **Standards bodies** — CWE, CVE, NVD, OWASP, IETF RFC, ISO/IEC, JSON Schema. Cite the specific number.
 3. **Vendor-published security analyses** — e.g. Pluto Security architecture analyses for Managed Agents. Acceptable when no primary doc covers the topic.
-4. **Memento decisions** captured in this project — for process choices without an external authority.
+4. **Project decision records (ADRs)** in [`docs/decisions/`](docs/decisions/) — for process or design choices without an external authority. Nygard format (Context / Decision / Consequences / Alternatives).
 
 Not acceptable: random blog posts, Stack Overflow answers without primary backing, author's unsourced opinion.
 
@@ -131,8 +133,8 @@ Documentation-only changes (this file, `docs/`, `SKILL.md`, README, `SECURITY.md
 
 Stop. Either:
 - The change isn't necessary — drop it.
-- The change is novel — capture a Memento decision first (`mcp__memento__decision_create`) with rationale, alternatives, and why no external authority covers this. The decision becomes the authority for the commit.
+- The change is novel and no external standard covers it — write an ADR first in [`docs/decisions/`](docs/decisions/). One file, next sequential number (e.g. `0006-some-name.md`), Nygard format: **Context / Decision / Consequences / Alternatives considered**. Cite the ADR file path in your commit body. The ADR becomes the authority.
 
 ---
 
-*Last updated 2026-05-15. Policy decisions in Memento: `17f98e5d` (PR strategy), `e6984cc3` (disclosure posture).*
+*Last updated 2026-05-15. Related ADRs: [0001-disclosure-posture](docs/decisions/0001-disclosure-posture.md), [0002-pr-strategy](docs/decisions/0002-pr-strategy.md).*

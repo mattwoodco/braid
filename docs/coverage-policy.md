@@ -1,6 +1,6 @@
 # Coverage policy
 
-**Updated 2026-05-15 (Slice 45 close).** Tracked node: Memento plan ledger `ca9deec2`.
+**Updated 2026-05-15.** Coverage gate added with the orchestration-coverage test suite.
 
 ## Current
 
@@ -17,13 +17,13 @@
   - `lib.ts`: **81.57%** ✅
   - `sdk-adapter.ts`: 100%
 
-Both axes clear the **≥80% function / ≥70% line** floor stated by Slice 40. Slice 45 (this follow-up) is closed.
+Both axes clear the **≥80% function / ≥70% line** floor.
 
 ## CI gate
 
-As of Slice 45, the CI workflow's coverage step **is gated**, no longer informational. A PR that drops coverage below the floor fails. The previous `continue-on-error: true` is removed.
+The CI workflow's coverage step is gated, not informational. A PR that drops coverage below the floor fails. No `continue-on-error`.
 
-## What's tested now (orchestration paths previously uncovered)
+## What's tested (orchestration paths)
 
 | Surface | Test file | Notes |
 |---|---|---|
@@ -31,11 +31,11 @@ As of Slice 45, the CI workflow's coverage step **is gated**, no longer informat
 | `downloadSessionFiles` | `tests/orchestration-coverage.test.ts` | Iterates files.list + files.download |
 | `pullAgents` | `tests/orchestration-coverage.test.ts` | Including dry-run and unknown-key error path |
 | `runSentinel` | `tests/orchestration-coverage.test.ts` | Including no-config and exception paths |
-| `ensureResources` | `tests/ensure-resources.test.ts` | From Slice 40 |
-| `createOrResumeSession` | `tests/session-lifecycle.test.ts` | From Slice 40 |
-| `cleanupAbandonedSession` | `tests/session-lifecycle.test.ts` | From Slice 40 |
-| `runReflection` | `tests/run-reflection.test.ts` | From Slice 100 |
-| `runPostSessionHook` | `tests/post-session-hook.test.ts` | From Slice 10 |
+| `ensureResources` | `tests/ensure-resources.test.ts` | |
+| `createOrResumeSession` | `tests/session-lifecycle.test.ts` | |
+| `cleanupAbandonedSession` | `tests/session-lifecycle.test.ts` | |
+| `runReflection` | `tests/run-reflection.test.ts` | |
+| `runPostSessionHook` | `tests/post-session-hook.test.ts` | |
 
 ## What's still uncovered (intentional)
 
@@ -58,4 +58,4 @@ These are not blocking — the test-pyramid principle: deterministic logic gets 
 
 ## When the floor moves
 
-The floor is the **stated minimum**, not the target. Aspirationally we want 90/85 on lib.ts. New code lands with coverage at or above its surface average; ratchet up the global floor as the orchestration coverage gap closes further.
+The floor is the **stated minimum**, not the target. Aspirationally we want 90/85 on `lib.ts`. New code lands with coverage at or above its surface average; ratchet up the global floor as the orchestration coverage gap closes further.
